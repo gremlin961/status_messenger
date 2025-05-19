@@ -16,7 +16,9 @@ eggs/
 .eggs/
 lib/
 lib64/
+out/
 parts/
+public/
 sdist/
 var/
 wheels/
@@ -25,6 +27,14 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json # See note below if you prefer to commit it
+yarn.lock         # See note below if you prefer to commit it
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
