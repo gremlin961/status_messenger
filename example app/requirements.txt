@@ -1,0 +1,9 @@
+fastapi>=0.70.0
+jinja2
+uvicorn[standard]>=0.15.0 # [standard] includes performance extras like websockets and http tools
+status-messenger  # This would be listed if installing from PyPI
+# To install your local status-messenger package for this test,
+# navigate to the 'test' directory and run:
+# pip install -e ../status_messenger_py
+# or if you have built the wheel:
+# pip install ../status_messenger_py/dist/status_messenger-0.1.0-py3-none-any.whl (adjust filename if needed)
