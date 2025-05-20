@@ -23,12 +23,11 @@ typically for agentic applications or long-running processes
 where updates need to be communicated to a UI.
 """
 
-from .messenger import AGENT_STATUS_MESSAGES, add_status_message, get_status_messages
+from .messenger import add_status_message, get_status_messages
 
 __all__ = [
-    "AGENT_STATUS_MESSAGES",
     "add_status_message",
     "get_status_messages",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.1.2"

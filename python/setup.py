@@ -22,7 +22,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="status_messenger",
-    version="0.1.0", # Should match __version__ in __init__.py
+    version="0.1.2", # Should match __version__ in __init__.py
     author="Cline - AI Software Engineer",
     author_email="your_email@example.com", # Replace with a placeholder or actual email
     description="A simple package to manage and display status messages.",
