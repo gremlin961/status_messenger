@@ -15,22 +15,24 @@
 # limitations under the License.
 
 import json
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
-AGENT_STATUS_MESSAGES: List[str] = []
+AGENT_LATEST_MESSAGE: Optional[str] = None
 
 def add_status_message(message: str) -> None:
     """
-    Clears old status messages, adds the new message, and prints to console.
-    This list is intended to be accessed by a web endpoint.
+    Sets the latest status message and prints to console.
+    This message is intended to be accessed by a web endpoint.
     """
+    global AGENT_LATEST_MESSAGE
     print(message)  # Log to console
-    AGENT_STATUS_MESSAGES.clear()
-    AGENT_STATUS_MESSAGES.append(message)
+    AGENT_LATEST_MESSAGE = message
 
 def get_status_messages() -> List[str]:
-    """Returns the current list of status messages."""
-    return AGENT_STATUS_MESSAGES
+    """Returns the current latest status message as a list."""
+    if AGENT_LATEST_MESSAGE is None:
+        return []
+    return [AGENT_LATEST_MESSAGE]
 
 # Example for serving messages with Flask (optional, can be in a separate server file)
 # from flask import Flask, jsonify
@@ -40,7 +42,7 @@ def get_status_messages() -> List[str]:
 
 #     @app.route('/status', methods=['GET'])
 #     def status():
-#         return jsonify(AGENT_STATUS_MESSAGES)
+#         return jsonify(get_status_messages())
 
 #     return app
 
