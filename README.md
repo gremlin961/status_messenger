@@ -10,10 +10,12 @@ The primary goal of this project is to demonstrate how `status_messenger` can be
 
 ## Examples
 
-Example implementations showcasing the usage of `status_messenger` can be found in the `example app/` directory:
+Example implementations showcasing the usage of `status_messenger` can be found in the `example_app/` directory:
 
-*   **`example app/app.py`**: A Python example demonstrating server-side usage.
-*   **`example app/static/` directory**: Contains client-side JavaScript examples (`example app/static/status-messenger.js` and `example app/static/index.html`) illustrating how to use the messenger in a web interface.
+*   **`example_app/main.py`**: A Python FastAPI application demonstrating server-side integration. It sends various message types, including status updates, over a WebSocket connection.
+*   **`example_app/static/` directory**: Contains the client-side example:
+    *   `index.html`: The main HTML page for the example application.
+    *   `script.js`: Handles the primary chat functionality and user interactions. It now integrates the `status_messenger` JavaScript library (loaded via CDN) to display status messages received from the server in a dedicated area.
 
 ## Modules
 

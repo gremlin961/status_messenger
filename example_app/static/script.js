@@ -3,7 +3,7 @@ const messageForm = document.getElementById("messageForm");
 const messageInputElement = document.getElementById("messageInput"); // Renamed variable
 const messagesDiv = document.getElementById("messages");
 const sendButton = document.getElementById("sendButton");
-const agentStatusMessagesDiv = document.getElementById("agent-status-messages"); // Defined earlier for clarity
+// const agentStatusMessagesDiv = document.getElementById("agent-status-messages"); // Will be handled by status-messenger library
 
 let currentMessageId = null;
 let currentMessageBuffer = ""; // Buffer for current agent message text for Markdown rendering
@@ -23,16 +23,16 @@ function connectWebSocket() {
     addWebSocketHandlers(ws);
 }
 
-function displayStatusMessage(text, type = 'status') {
-    const p = document.createElement('p');
-    p.classList.add('status-message');
-    if (type === 'error') {
-        p.classList.add('error-message');
-    }
-    p.textContent = text;
-    messagesDiv.appendChild(p);
-    messagesDiv.scrollTop = messagesDiv.scrollHeight;
-}
+// function displayStatusMessage(text, type = 'status') { // This function will be removed
+//     const p = document.createElement('p');
+//     p.classList.add('status-message');
+//     if (type === 'error') {
+//         p.classList.add('error-message');
+//     }
+//     p.textContent = text;
+//     messagesDiv.appendChild(p); // This was writing to messagesDiv, not agentStatusMessagesDiv
+//     messagesDiv.scrollTop = messagesDiv.scrollHeight;
+// }
 
 function displayUserMessage(text) {
     const p = document.createElement("p");
@@ -49,13 +49,7 @@ function addWebSocketHandlers(websocketInstance) {
   websocketInstance.onopen = function () {
     console.info("WebSocket connection opened successfully (client-side).");
     sendButton.disabled = false;
-    // Display initial connection status in the agentStatusMessagesDiv
-    agentStatusMessagesDiv.innerHTML = ''; // Clear it first
-    const p = document.createElement('p');
-    p.textContent = "Connection with server established.";
-    agentStatusMessagesDiv.appendChild(p);
-    agentStatusMessagesDiv.scrollTop = agentStatusMessagesDiv.scrollHeight;
-
+    // Initial connection status will be handled by status-messenger.js via its own WebSocket connection or messages
     // The form submit handler is now added outside onopen, once.
   };
 
@@ -65,7 +59,12 @@ function addWebSocketHandlers(websocketInstance) {
         packet = JSON.parse(event.data);
     } catch (e) {
         console.error("Failed to parse WebSocket message JSON:", event.data, e);
-        displayStatusMessage("Received unparsable message from server.", "error"); // Use existing general status for this error
+        // Error display for main messagesDiv if needed, or rely on status-messenger for its own errors
+        const p = document.createElement('p');
+        p.classList.add('error-message');
+        p.textContent = "Received unparsable message from server.";
+        messagesDiv.appendChild(p);
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
         return;
     }
 
@@ -86,20 +85,18 @@ function addWebSocketHandlers(websocketInstance) {
     }
     // --- End server-side log message handling ---
 
-    // --- Handle application status messages from server ---
-    if (packet.type === "status") {
-        if (packet.data) {
-            agentStatusMessagesDiv.innerHTML = ''; // Clear previous status messages
-            const p = document.createElement('p');
-            p.textContent = packet.data; // Assuming packet.data is plain text
-            agentStatusMessagesDiv.appendChild(p);
-            agentStatusMessagesDiv.scrollTop = agentStatusMessagesDiv.scrollHeight;
-        }
-        return; // This was an app status message
-    }
-    // --- End application status message handling ---
+    // --- Application status messages (packet.type === "status") are now handled by status-messenger.js ---
+    // The main WebSocket connection (ws) will ignore them if they are still sent on this channel.
+    // Ideally, the server would send them on a dedicated status WebSocket if a separate one was used,
+    // or status-messenger.js connects to the same endpoint and filters.
+    // Given status-messenger.js will connect to ws_url, it will receive these.
 
     // --- Regular agent message processing ---
+    if (packet.type === "status") { // Explicitly ignore status messages on this handler
+        console.debug("[Main WS] Ignoring status packet, should be handled by status-messenger.js", packet);
+        return;
+    }
+    
     if (packet.turn_complete) { // Simplified check
       console.info("Agent turn complete (client received).");
       currentMessageId = null;
@@ -162,32 +159,21 @@ function addWebSocketHandlers(websocketInstance) {
    websocketInstance.onclose = function (event) {
     console.warn(`WebSocket connection closed (client-side). Code: ${event.code}, Reason: '${event.reason}'`);
     sendButton.disabled = true;
-    // Display connection closed status in the agentStatusMessagesDiv
-    agentStatusMessagesDiv.innerHTML = ''; // Clear it first
-    const p = document.createElement('p');
-    p.classList.add('error-message'); // Style as error
-    p.textContent = "Connection closed. Attempting to reconnect in 5 seconds...";
-    agentStatusMessagesDiv.appendChild(p);
-    agentStatusMessagesDiv.scrollTop = agentStatusMessagesDiv.scrollHeight;
+    // Connection closed status for the main chat WebSocket will be handled by status-messenger.js for its display
+    // This WebSocket will attempt to reconnect for chat functionality.
 
     currentMessageId = null;
     currentMessageBuffer = "";
 
     setTimeout(function () {
-      console.info("Attempting to reconnect WebSocket...");
+      console.info("Attempting to reconnect WebSocket for chat...");
       connectWebSocket(); 
     }, 5000);
   };
 
   websocketInstance.onerror = function (error) {
     console.error("WebSocket error (client-side): ", error);
-    // Display WebSocket error in the agentStatusMessagesDiv
-    agentStatusMessagesDiv.innerHTML = ''; // Clear it first
-    const p = document.createElement('p');
-    p.classList.add('error-message'); // Style as error
-    p.textContent = "A WebSocket error occurred. Check console for details.";
-    agentStatusMessagesDiv.appendChild(p);
-    agentStatusMessagesDiv.scrollTop = agentStatusMessagesDiv.scrollHeight;
+    // WebSocket error display for the main chat WebSocket will be handled by status-messenger.js for its display
   };
 }
 
@@ -201,13 +187,14 @@ if (messageForm) {
             ws.send(messageText);
             messageInputElement.value = ""; 
         } else {
-            // Display error in agentStatusMessagesDiv if cannot send
-            agentStatusMessagesDiv.innerHTML = ''; // Clear it first
+            // Error if cannot send message - this could be displayed in the main messagesDiv or rely on status-messenger
+            console.error("Cannot send message. Main WebSocket connection not active.");
+            // Optionally, display a message in messagesDiv or a general error area if not using status-messenger for this
             const p = document.createElement('p');
-            p.classList.add('error-message'); // Style as error
+            p.classList.add('error-message');
             p.textContent = "Cannot send message. Connection not active.";
-            agentStatusMessagesDiv.appendChild(p);
-            agentStatusMessagesDiv.scrollTop = agentStatusMessagesDiv.scrollHeight;
+            messagesDiv.appendChild(p);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
         }
         return false; 
     };
@@ -215,7 +202,19 @@ if (messageForm) {
     console.error("Message form not found in the DOM.");
 }
 
-connectWebSocket();
+connectWebSocket(); // Connect the main chat WebSocket
+
+// Initialize status updates using the status-messenger library
+// It will connect to the same WebSocket endpoint and filter for status messages.
+if (typeof window.startStatusUpdates === 'function') {
+    console.info("Initializing status-messenger for #agent-status-messages");
+    // The ws_url is the same as the main chat, as the server sends all message types over it.
+    // status-messenger.js is now responsible for filtering and displaying only 'status' type messages.
+    window.startStatusUpdates('agent-status-messages', ws_url);
+} else {
+    console.error("status-messenger.js (startStatusUpdates) not found. Status messages will not be displayed by the library.");
+}
+
 
 function escapeHtml(unsafe) {
     if (unsafe === null || unsafe === undefined) return '';
