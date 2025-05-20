@@ -1,12 +1,12 @@
 {
   "name": "status-messenger",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "status-messenger.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
+  "keywords": ["websocket", "status", "realtime"],
   "author": "",
   "license": "ISC",
-  "description": ""
+  "description": "A client-side JavaScript library to display real-time status messages using WebSockets."
 }
