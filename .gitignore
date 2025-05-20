@@ -28,13 +28,14 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+
 # Node.js
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-package-lock.json # See note below if you prefer to commit it
-yarn.lock         # See note below if you prefer to commit it
+package-lock.json
+yarn.lock
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
