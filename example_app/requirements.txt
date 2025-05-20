@@ -1,0 +1,12 @@
+fastapi
+jinja2
+uvicorn
+requests
+pydantic
+google-cloud-aiplatform
+google-cloud-storage
+google-cloud-bigquery
+google-api-core
+google-genai
+google-adk
+status-messenger  # Status Messenger module from PyPi
