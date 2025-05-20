@@ -126,9 +126,9 @@ reasoning_agent = Agent(
         
         An example workflow would be:
         1: You will be provided with a topic or question to research
-        2: Use the `status_message` tool to provide the status "Reasearching `the provided question or topic` now. Please wait..."
+        2: Use the `status_message` tool to provide the status "Researching `the provided question or topic` now. Please wait..."
         3: Use the `status_message` tool to provide the status "Research complete, generating the response now"
-        4: Use the `status_message` tool to provide the status "Sending resutls back to the root agent. Please wait."
+        4: Use the `status_message` tool to provide the status "Sending results back to the root agent. Please wait."
         5: Return the response to the calling agent
         
     """,
