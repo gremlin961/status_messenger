@@ -17,6 +17,27 @@ Example implementations showcasing the usage of `status_messenger` can be found 
     *   `index.html`: The main HTML page for the example application.
     *   `script.js`: Handles the primary chat functionality and user interactions. It now integrates the `status_messenger` JavaScript library (loaded via CDN) to display status messages received from the server in a dedicated area.
 
+## Running the Example Application
+
+The `example_app/` can be easily run using the provided shell script. This script handles the necessary setup for the Google Cloud Project ID and launches the Uvicorn server.
+
+1.  **Navigate to the example app directory:**
+    ```bash
+    cd example_app
+    ```
+
+2.  **Make the script executable (if you haven't already):**
+    ```bash
+    chmod +x run_app.sh
+    ```
+
+3.  **Run the script:**
+    ```bash
+    ./run_app.sh
+    ```
+    The script will guide you if the `.env` file for the agent needs to be configured with your Google Cloud Project ID.
+    Once running, the application will be accessible at `http://localhost:8000`.
+
 ## Modules
 
 ### Python

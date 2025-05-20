@@ -30,11 +30,6 @@ from example_agent.agent import root_agent # Using the agent from example_agent
 from status_messenger import get_status_messages, add_status_message # For application-level status updates
 
 
-
-# Load .env file (e.g., for GOOGLE_CLOUD_PROJECT, etc. if agent needs them directly)
-# The agent.py itself also loads .env and initializes Vertex AI.
-load_dotenv(dotenv_path=Path(__file__).parent / '.env')
-
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
