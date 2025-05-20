@@ -47,35 +47,49 @@ function startStatusUpdates(elementId, websocketUrl, reconnectDelayMs = 5000) {
         ws.onmessage = function (event) {
             try {
                 const packet = JSON.parse(event.data);
-                
-                // Assuming the server sends status messages in a structure like:
-                // { type: "status", data: "Your status message here" }
-                // Or a simple string if not structured.
-                if (typeof packet === 'string') {
-                    displayElement.textContent = packet;
-                } else if (packet && packet.type === "status" && packet.data !== undefined) {
-                    displayElement.textContent = packet.data;
-                } else if (packet && packet.message !== undefined) { // Fallback for other simple message structures
-                    displayElement.textContent = packet.message;
+
+                if (packet && packet.type === "status" && packet.data !== undefined) {
+                    displayElement.innerHTML = ''; // Clear previous content
+                    const p = document.createElement('p');
+                    p.textContent = packet.data;
+                    // Optionally, add a class for styling if needed, e.g., p.classList.add('status-message-item');
+                    displayElement.appendChild(p);
+                    displayElement.scrollTop = displayElement.scrollHeight; // Scroll to bottom
+                } else if (packet) {
+                    console.warn("[StatusMessenger] Received WebSocket message of unexpected type or structure:", packet);
+                    // Optionally, display a generic message or the raw data if appropriate for debugging
+                    // For a dedicated status display, it's often better to ignore non-status messages silently
+                    // or provide a subtle indication that non-status data was received.
+                    // displayElement.textContent = "Received non-status data (see console)";
                 } else {
-                    // If the structure is unknown, display the raw data or a generic message
-                    console.warn("[StatusMessenger] Received WebSocket message with unknown structure:", packet);
-                    displayElement.textContent = typeof event.data === 'string' ? event.data : "Received data (see console)";
+                    // This case should ideally not be reached if JSON.parse was successful and returned an object.
+                    console.warn("[StatusMessenger] Received unparseable or empty packet structure:", event.data);
                 }
             } catch (e) {
-                console.error("[StatusMessenger] Failed to parse WebSocket message JSON or handle message:", event.data, e);
-                // Display the raw message if parsing fails and it's a string
+                console.error("[StatusMessenger] Failed to parse WebSocket message JSON:", event.data, e);
+                // Display an error or the raw message if parsing fails
+                displayElement.innerHTML = ''; // Clear previous content
+                const p = document.createElement('p');
+                p.classList.add('error-message'); // Add an error class for styling
                 if (typeof event.data === 'string') {
-                    displayElement.textContent = event.data;
+                    p.textContent = `Error parsing message: ${event.data.substring(0,100)}${event.data.length > 100 ? '...' : ''}`;
                 } else {
-                    displayElement.textContent = "Error processing message. See console.";
+                    p.textContent = "Error processing message. See console.";
                 }
+                displayElement.appendChild(p);
+                displayElement.scrollTop = displayElement.scrollHeight;
             }
         };
 
         ws.onclose = function (event) {
             console.warn(`[StatusMessenger] WebSocket connection closed. Code: ${event.code}, Reason: '${event.reason}'. Attempting to reconnect in ${reconnectDelayMs}ms.`);
-            displayElement.textContent = `Connection closed. Reconnecting...`;
+            // Avoid clearing the last known status on temporary disconnects if preferred,
+            // but for simplicity, we can set a "reconnecting" message.
+            displayElement.innerHTML = ''; // Clear previous content
+            const p = document.createElement('p');
+            p.textContent = `Connection closed. Reconnecting...`;
+            displayElement.appendChild(p);
+            displayElement.scrollTop = displayElement.scrollHeight;
             ws = null; // Ensure ws is null so stop function doesn't try to close an already closed socket
             setTimeout(connect, reconnectDelayMs);
         };
