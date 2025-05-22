@@ -27,7 +27,10 @@ from starlette.websockets import WebSocketState
 # --- Agent Imports for the Google ADK ---
 from example_agent.agent import root_agent # Using the agent from example_agent
 # --- Status Messenger Import ---
-from status_messenger import get_status_messages, add_status_message # For application-level status updates
+import status_messenger # Import the module
+# from status_messenger import get_status_messages, add_status_message # Old imports commented out/removed
+# from example_agent.agent_context import current_session_id_var # REMOVE context variable import
+# For application-level status updates
 
 
 # Configure basic logging
@@ -42,71 +45,42 @@ artifact_service = InMemoryArtifactService()
 # Global store for active websockets, mapping session_id to WebSocket object
 active_websockets: Dict[str, WebSocket] = {}
 
-async def send_server_log_to_client(websocket: WebSocket, level: str, message: str, session_id: str):
-    """Helper function to send a server diagnostic log message to the client."""
-    try:
-        if websocket.client_state == WebSocketState.CONNECTED:
-            log_payload = {
-                "type": "server_log",
-                "level": level.upper(),
-                "message": f"[{session_id}] {message}"
-            }
-            await websocket.send_text(json.dumps(log_payload))
-        else:
-            logger.debug(f"[SERVER LOG SEND - {session_id}] WebSocket not connected. Log not sent: {message}")
-    except Exception as e:
-        logger.error(f"[SERVER LOG SEND - {session_id}] Error sending log to client: {e}", exc_info=False)
-
 async def broadcast_app_status_to_client(websocket: WebSocket, status_text: str, session_id: str):
     """Sends an application status message (type: 'status') to a single WebSocket client."""
+    # try...except removed
     if websocket.client_state == WebSocketState.CONNECTED:
-        try:
-            payload = {"type": "status", "data": status_text} # As expected by index.html
-            await websocket.send_text(json.dumps(payload))
-            logger.info(f"[{session_id}] SENT_APP_STATUS_TO_CLIENT: {status_text}")
-        except Exception as e:
-            logger.error(f"[{session_id}] Error sending app status to client: {e}", exc_info=False)
+        payload = {"type": "status", "data": status_text} # As expected by index.html
+        await websocket.send_text(json.dumps(payload))
+        logger.info(f"[{session_id}] SENT_APP_STATUS_TO_CLIENT: {status_text}")
 
-async def application_status_monitor():
+async def status_message_broadcaster():
     """
-    Periodically fetches messages from status_messenger and broadcasts new ones
-    to all connected WebSocket clients.
+    Consumes status messages from status_messenger's queue and sends them
+    to the appropriate WebSocket client based on session_id.
     """
-    logger.info("Application status monitor task starting.")
-    try:
-        if 'get_status_messages' in globals() and callable(get_status_messages):
-            previously_broadcast_statuses = set(get_status_messages())
+    logger.info("Status message broadcaster task starting.")
+    async for target_session_id, message_text in status_messenger.stream_status_updates():
+        logger.debug(f"Received status for session {target_session_id} from queue: {message_text}")
+        ws = active_websockets.get(target_session_id)
+        if ws and ws.client_state == WebSocketState.CONNECTED:
+            try:
+                # broadcast_app_status_to_client already logs success/failure
+                await broadcast_app_status_to_client(ws, message_text, target_session_id)
+            except Exception as e:
+                # This catch is if broadcast_app_status_to_client itself raises an unhandled error
+                # (though we removed its internal try-except, so errors would propagate here)
+                logger.error(f"[{target_session_id}] Error in status_message_broadcaster while sending: {e}", exc_info=True)
+        elif ws and ws.client_state != WebSocketState.CONNECTED:
+            logger.warn(f"[{target_session_id}] WebSocket found but not connected for status message: {message_text}")
+            # Optionally remove from active_websockets here if not handled elsewhere,
+            # but disconnects are usually handled in the main websocket_endpoint.
         else:
-            logger.error("status_messenger.get_status_messages is not available. Status monitoring disabled.")
-            return
-    except Exception as e:
-        logger.error(f"Error initializing status monitor with get_status_messages: {e}", exc_info=True)
-        return
+            logger.warn(f"[{target_session_id}] No active WebSocket found for status message: {message_text}")
 
-    while True:
-        await asyncio.sleep(0.5) # Poll interval
-        try:
-            current_all_statuses = get_status_messages()
-            new_unique_statuses_to_broadcast = set(current_all_statuses) - previously_broadcast_statuses
-
-            if new_unique_statuses_to_broadcast:
-                logger.debug(f"Found {len(new_unique_statuses_to_broadcast)} new app status(es) to broadcast.")
-                for session_id, ws in list(active_websockets.items()):
-                    if ws.client_state == WebSocketState.CONNECTED:
-                        for status_msg in new_unique_statuses_to_broadcast:
-                            await broadcast_app_status_to_client(ws, status_msg, session_id)
-                    else:
-                        logger.info(f"[{session_id}] Removing disconnected WebSocket from status broadcast list.")
-                        active_websockets.pop(session_id, None)
-                previously_broadcast_statuses.update(new_unique_statuses_to_broadcast)
-        except Exception as e:
-            logger.error(f"Error in application_status_monitor loop: {e}", exc_info=True)
-            await asyncio.sleep(5) # Longer pause if error in loop
-
-def start_agent_session(session_id: str):
+async def start_agent_session(session_id: str): # Changed to async def
     """Starts an ADK agent session."""
     logger.info(f"[{session_id}] Attempting to start agent session.")
-    session = session_service.create_session(
+    session = await session_service.create_session( # Added await
         app_name=APP_NAME,
         user_id=session_id,
         session_id=session_id,
@@ -129,83 +103,72 @@ def start_agent_session(session_id: str):
 
 async def agent_to_client_messaging(websocket: WebSocket, live_events, session_id: str):
     """Handles messages from ADK agent to the WebSocket client."""
-    await send_server_log_to_client(websocket, "INFO", "Agent-to-client messaging task started.", session_id)
+    # Outer try...except asyncio.CancelledError...finally retained
     try:
         async for event in live_events:
             message_to_send = None
             server_log_detail = None
             if event.turn_complete:
                 server_log_detail = "Agent turn complete."
-                message_to_send = {"type": "agent_turn_complete", "turn_complete": True} # Explicit type
+                message_to_send = {"type": "agent_turn_complete", "turn_complete": True}
             elif event.interrupted:
                 server_log_detail = "Agent turn interrupted."
-                message_to_send = {"type": "agent_interrupted", "interrupted": True} # Explicit type
+                message_to_send = {"type": "agent_interrupted", "interrupted": True}
             else:
                 part: Part = (event.content and event.content.parts and event.content.parts[0])
-                if part and part.text: # Ensure text exists
+                if part and part.text:
                     text = part.text
-                    # server_log_detail = f"Sending agent message chunk (length: {len(text)})." # Can be verbose
-                    message_to_send = {"type": "agent_message", "message": text} # Explicit type for chat
+                    message_to_send = {"type": "agent_message", "message": text}
 
             if server_log_detail:
                 logger.info(f"[{session_id}] AGENT->CLIENT_TASK: {server_log_detail}")
-                await send_server_log_to_client(websocket, "DEBUG", server_log_detail, session_id)
+                # Removed call to send_server_log_to_client
 
             if message_to_send:
-                try:
-                    await websocket.send_text(json.dumps(message_to_send))
-                except WebSocketDisconnect:
-                    logger.warning(f"[{session_id}] Client disconnected during agent message send.")
-                    return
-                except Exception as e:
-                    logger.error(f"[{session_id}] Error sending agent message to client: {e}", exc_info=True)
-                    return
+                # Inner try...except removed around send_text
+                await websocket.send_text(json.dumps(message_to_send))
         logger.info(f"[{session_id}] Live events stream from agent finished.")
-        await send_server_log_to_client(websocket, "INFO", "Live events stream from agent finished.", session_id)
+        # Removed call to send_server_log_to_client
     except asyncio.CancelledError:
         logger.info(f"[{session_id}] Agent-to-client messaging task cancelled.")
-        raise
-    except Exception as e:
-        logger.error(f"[{session_id}] Unexpected error in agent-to-client messaging: {e}", exc_info=True)
-        await send_server_log_to_client(websocket, "ERROR", f"Error in agent-to-client: {e}", session_id)
+        raise # Re-raise CancelledError to be handled by asyncio.wait
+    except Exception as e: # Catch other exceptions that were previously unhandled by inner try-except
+        logger.error(f"[{session_id}] Unexpected error in agent_to_client_messaging: {e}", exc_info=True)
+        # Removed call to send_server_log_to_client
     finally:
         logger.info(f"[{session_id}] Agent-to-client messaging task finished.")
 
 async def client_to_agent_messaging(websocket: WebSocket, live_request_queue: LiveRequestQueue, session_id: str):
     """Handles messages from WebSocket client to the ADK agent."""
-    await send_server_log_to_client(websocket, "INFO", "Client-to-agent messaging task started.", session_id)
+    # Outer try...except asyncio.CancelledError...finally retained
     try:
         while True:
-            try:
-                text = await websocket.receive_text()
-                logger.info(f"[{session_id}] CLIENT->AGENT_TASK: Received text: '{text}'")
-                await send_server_log_to_client(websocket, "INFO", f"Received text: '{text}'", session_id)
-                content = Content(role="user", parts=[Part.from_text(text=text)])
-                live_request_queue.send_content(content=content)
-                await send_server_log_to_client(websocket, "DEBUG", "Content sent to agent's live request queue.", session_id)
-            except WebSocketDisconnect:
-                logger.info(f"[{session_id}] WebSocket disconnected by client.")
-                live_request_queue.close()
-                break
-            except Exception as e:
-                 logger.error(f"[{session_id}] Error receiving/processing client message: {e}", exc_info=True)
-                 await send_server_log_to_client(websocket, "ERROR", f"Error processing client message: {e}", session_id)
-                 live_request_queue.close()
-                 break
+            # Inner try...except removed
+            text = await websocket.receive_text()
+            logger.info(f"[{session_id}] CLIENT->AGENT_TASK: Received text: '{text}'")
+            # Removed call to send_server_log_to_client
+            content = Content(role="user", parts=[Part.from_text(text=text)])
+            live_request_queue.send_content(content=content)
+            # Removed call to send_server_log_to_client
+    except WebSocketDisconnect: # Explicitly catch WebSocketDisconnect here now
+        logger.info(f"[{session_id}] WebSocket disconnected by client.")
+        live_request_queue.close()
+        # Removed break, as exception will terminate loop
     except asyncio.CancelledError:
         logger.info(f"[{session_id}] Client-to-agent messaging task cancelled.")
         live_request_queue.close()
-        raise
-    except Exception as e:
-        logger.error(f"[{session_id}] Unexpected error in client-to-agent messaging: {e}", exc_info=True)
-        await send_server_log_to_client(websocket, "ERROR", f"Error in client-to-agent: {e}", session_id)
-        live_request_queue.close()
+        raise # Re-raise CancelledError
+    except Exception as e: # Catch other exceptions
+         logger.error(f"[{session_id}] Error receiving/processing client message: {e}", exc_info=True)
+         # Removed call to send_server_log_to_client
+         live_request_queue.close()
+         # Removed break
     finally:
         logger.info(f"[{session_id}] Client-to-agent messaging task finished.")
 
 app = FastAPI(title=APP_NAME, version="0.1.0")
 
-origins = ["*",] # Allow all for dev; restrict in prod
+origins = ["*",]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -223,8 +186,10 @@ else:
 
 @app.on_event("startup")
 async def startup_event():
-    asyncio.create_task(application_status_monitor(), name="app_status_monitor_task")
-    logger.info("Application status monitor task scheduled for startup.")
+    loop = asyncio.get_running_loop()
+    status_messenger.setup_status_messenger_async(loop)
+    asyncio.create_task(status_message_broadcaster(), name="status_message_broadcaster_task")
+    logger.info("Status message broadcaster task scheduled for startup.")
 
 @app.get("/")
 async def root_path():
@@ -240,17 +205,22 @@ async def websocket_endpoint(websocket: WebSocket, session_id_from_path: str):
     await websocket.accept()
     active_websockets[session_id] = websocket
     logger.info(f"[{session_id}] Client connected. Added to active list for status broadcasts.")
-    await send_server_log_to_client(websocket, "INFO", "Server accepted WebSocket connection.", session_id)
+    # Removed call to send_server_log_to_client
 
     live_events = None
     live_request_queue = None
     agent_to_client_task = None
     client_to_agent_task = None
+    # context_var_token = None # REMOVE context variable token
 
+    # Outer try...finally retained for cleanup
     try:
+        # context_var_token = current_session_id_var.set(session_id) # REMOVE Set context var
+
         logger.info(f"[{session_id}] Initializing agent session backend.")
-        live_events, live_request_queue = start_agent_session(session_id)
-        await send_server_log_to_client(websocket, "INFO", "Agent session backend initialized.", session_id)
+        # try...except removed around start_agent_session
+        live_events, live_request_queue = await start_agent_session(session_id) # Added await
+        # Removed call to send_server_log_to_client
 
         agent_to_client_task = asyncio.create_task(
             agent_to_client_messaging(websocket, live_events, session_id),
@@ -260,21 +230,27 @@ async def websocket_endpoint(websocket: WebSocket, session_id_from_path: str):
             client_to_agent_messaging(websocket, live_request_queue, session_id),
             name=f"client_to_agent_{session_id}"
         )
+        # try...except removed around asyncio.wait
         done, pending = await asyncio.wait(
             {agent_to_client_task, client_to_agent_task},
             return_when=asyncio.FIRST_COMPLETED,
         )
         for task in done:
+            # This was error logging for tasks, if one errored, it would be caught by the broader try/except now
+            # Or if it's a specific exception like WebSocketDisconnect, it's handled in the task or propagates
             if task.exception() and not isinstance(task.exception(), (WebSocketDisconnect, asyncio.CancelledError)):
-                exc = task.exception()
-                logger.error(f"[{session_id}] Task {task.get_name()} raised unhandled exception: {exc}", exc_info=exc)
-                await send_server_log_to_client(websocket, "ERROR", f"Task {task.get_name()} error: {exc}", session_id)
+                 exc = task.exception()
+                 logger.error(f"[{session_id}] Task {task.get_name()} raised unhandled exception during wait: {exc}", exc_info=exc)
+                 # Removed call to send_server_log_to_client
             else:
-                logger.info(f"[{session_id}] Task {task.get_name()} completed ({type(task.exception()).__name__ if task.exception() else 'normally'}).")
-    except Exception as e:
+                 logger.info(f"[{session_id}] Task {task.get_name()} completed ({type(task.exception()).__name__ if task.exception() else 'normally'}).")
+    except Exception as e: # This will now catch errors from start_agent_session and asyncio.wait
         logger.error(f"[{session_id}] Error in WebSocket endpoint: {e}", exc_info=True)
-        await send_server_log_to_client(websocket, "ERROR", f"WebSocket endpoint error: {e}", session_id)
+        # Removed call to send_server_log_to_client
     finally:
+        # if context_var_token: # REMOVE Reset context var
+            # current_session_id_var.reset(context_var_token)
+
         logger.info(f"[{session_id}] Client disconnecting / cleaning up tasks...")
         removed_ws = active_websockets.pop(session_id, None)
         if removed_ws: logger.info(f"[{session_id}] WebSocket removed from active list.")
@@ -311,12 +287,4 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     logger.info(f"Starting Uvicorn server on http://0.0.0.0:{port}")
-    # Correct app_dir should be the directory containing main.py, which is 'example_app'
-    # If running `python example_app/main.py`, __file__ is 'example_app/main.py'
-    # So Path(__file__).parent is 'example_app'
-    # Uvicorn's `app_dir` should be where it looks for the module `main`
-    # If main.py is in example_app, and we run `python example_app/main.py`,
-    # then uvicorn.run("main:app", app_dir=str(Path(__file__).parent)) is correct.
-    # However, the typical way to run is `uvicorn example_app.main:app` from the project root.
-    # The provided uvicorn.run call is for direct execution `python example_app/main.py`.
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True, app_dir=str(Path(__file__).parent))
