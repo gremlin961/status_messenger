@@ -28,8 +28,7 @@ from starlette.websockets import WebSocketState
 from example_agent.agent import root_agent # Using the agent from example_agent
 # --- Status Messenger Import ---
 import status_messenger # Import the module
-# from status_messenger import get_status_messages, add_status_message # Old imports commented out/removed
-# from example_agent.agent_context import current_session_id_var # REMOVE context variable import
+from status_messenger.messenger import current_websocket_session_id_var # Import the ContextVar from messenger
 # For application-level status updates
 
 
@@ -211,11 +210,11 @@ async def websocket_endpoint(websocket: WebSocket, session_id_from_path: str):
     live_request_queue = None
     agent_to_client_task = None
     client_to_agent_task = None
-    # context_var_token = None # REMOVE context variable token
+    context_var_token = None # Initialize token, will hold the reset token
 
     # Outer try...finally retained for cleanup
     try:
-        # context_var_token = current_session_id_var.set(session_id) # REMOVE Set context var
+        context_var_token = current_websocket_session_id_var.set(session_id) # Set context var
 
         logger.info(f"[{session_id}] Initializing agent session backend.")
         # try...except removed around start_agent_session
@@ -248,8 +247,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id_from_path: str):
         logger.error(f"[{session_id}] Error in WebSocket endpoint: {e}", exc_info=True)
         # Removed call to send_server_log_to_client
     finally:
-        # if context_var_token: # REMOVE Reset context var
-            # current_session_id_var.reset(context_var_token)
+        if context_var_token: # Reset context var if it was set
+            current_websocket_session_id_var.reset(context_var_token)
 
         logger.info(f"[{session_id}] Client disconnecting / cleaning up tasks...")
         removed_ws = active_websockets.pop(session_id, None)

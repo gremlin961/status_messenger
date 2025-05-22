@@ -13,6 +13,7 @@
 function startStatusUpdates(elementId, websocketUrl, reconnectDelayMs = 5000) {
     const displayElement = document.getElementById(elementId);
     let ws = null;
+    let jsonBuffer = ""; // Buffer for accumulating parts of a JSON message
 
     if (!displayElement) {
         console.error(`[StatusMessenger] Error: Element with ID '${elementId}' not found.`);
@@ -45,43 +46,53 @@ function startStatusUpdates(elementId, websocketUrl, reconnectDelayMs = 5000) {
         };
 
         ws.onmessage = function (event) {
+            console.log("[StatusMessenger] Raw message chunk received:", event.data);
+            jsonBuffer += event.data; // Append new data to buffer
+
             try {
-                const packet = JSON.parse(event.data);
+                // Attempt to parse the entire buffer. If it's not valid JSON yet, SyntaxError will be caught.
+                const packet = JSON.parse(jsonBuffer);
+
+                // If parse is successful, we have a complete JSON object
+                console.log("[StatusMessenger] Successfully parsed JSON from buffer:", packet);
+                jsonBuffer = ""; // Clear buffer as we've processed a complete JSON object
 
                 if (packet && packet.type === "status" && packet.data !== undefined) {
+                    console.log("[StatusMessenger] Processing status packet:", packet.data);
                     displayElement.innerHTML = ''; // Clear previous content
                     const p = document.createElement('p');
                     p.textContent = packet.data;
-                    // Optionally, add a class for styling if needed, e.g., p.classList.add('status-message-item');
                     displayElement.appendChild(p);
                     displayElement.scrollTop = displayElement.scrollHeight; // Scroll to bottom
+                    console.log("[StatusMessenger] Display element updated with:", packet.data);
                 } else if (packet) {
                     console.warn("[StatusMessenger] Received WebSocket message of unexpected type or structure:", packet);
-                    // Optionally, display a generic message or the raw data if appropriate for debugging
-                    // For a dedicated status display, it's often better to ignore non-status messages silently
-                    // or provide a subtle indication that non-status data was received.
-                    // displayElement.textContent = "Received non-status data (see console)";
                 } else {
-                    // This case should ideally not be reached if JSON.parse was successful and returned an object.
-                    console.warn("[StatusMessenger] Received unparseable or empty packet structure:", event.data);
+                    console.warn("[StatusMessenger] Received empty or unparseable packet structure after JSON parse:", packet);
                 }
             } catch (e) {
-                console.error("[StatusMessenger] Failed to parse WebSocket message JSON:", event.data, e);
-                // Display an error or the raw message if parsing fails
-                displayElement.innerHTML = ''; // Clear previous content
-                const p = document.createElement('p');
-                p.classList.add('error-message'); // Add an error class for styling
-                if (typeof event.data === 'string') {
-                    p.textContent = `Error parsing message: ${event.data.substring(0,100)}${event.data.length > 100 ? '...' : ''}`;
+                // If parsing fails, it's likely an incomplete JSON object or genuinely malformed.
+                if (e instanceof SyntaxError) {
+                    // Likely an incomplete JSON object, wait for more data.
+                    console.log("[StatusMessenger] Incomplete JSON in buffer, waiting for more data. Current buffer:", jsonBuffer.substring(0, 200) + (jsonBuffer.length > 200 ? "..." : ""));
                 } else {
-                    p.textContent = "Error processing message. See console.";
+                    // For other errors (not SyntaxError), it might be a more serious issue.
+                    console.error("[StatusMessenger] Error processing message buffer (not a SyntaxError):", e, "Buffer:", jsonBuffer);
+                    jsonBuffer = ""; // Clear buffer to prevent processing malformed data repeatedly
+
+                    // Display an error in the UI for non-syntax errors
+                    displayElement.innerHTML = ''; // Clear previous content
+                    const p = document.createElement('p');
+                    p.classList.add('error-message'); // Add an error class for styling
+                    p.textContent = "Error processing status message. See console.";
+                    displayElement.appendChild(p);
+                    displayElement.scrollTop = displayElement.scrollHeight;
                 }
-                displayElement.appendChild(p);
-                displayElement.scrollTop = displayElement.scrollHeight;
             }
         };
 
         ws.onclose = function (event) {
+            jsonBuffer = ""; // Clear buffer on disconnect
             console.warn(`[StatusMessenger] WebSocket connection closed. Code: ${event.code}, Reason: '${event.reason}'. Attempting to reconnect in ${reconnectDelayMs}ms.`);
             // Avoid clearing the last known status on temporary disconnects if preferred,
             // but for simplicity, we can set a "reconnecting" message.
