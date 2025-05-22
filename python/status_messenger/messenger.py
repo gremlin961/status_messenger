@@ -15,24 +15,75 @@
 # limitations under the License.
 
 import json
-from typing import List, Dict, Any, Optional
+import asyncio
+from contextvars import ContextVar # Added import
+from typing import List, Dict, Any, Optional, Tuple, AsyncIterator
 
-AGENT_LATEST_MESSAGE: Optional[str] = None
+# ContextVar to hold the current WebSocket session ID for the active async context
+current_websocket_session_id_var: ContextVar[Optional[str]] = ContextVar("current_websocket_session_id_var", default=None)
 
-def add_status_message(message: str) -> None:
+# asyncio.Queue to hold (session_id, message) tuples
+AGENT_MESSAGE_QUEUE: Optional[asyncio.Queue[Tuple[Optional[str], str]]] = None # session_id can be Optional
+_loop: Optional[asyncio.AbstractEventLoop] = None
+
+def setup_status_messenger_async(loop: asyncio.AbstractEventLoop) -> None:
     """
-    Sets the latest status message and prints to console.
-    This message is intended to be accessed by a web endpoint.
+    Initializes the status messenger with the asyncio event loop and creates the queue.
+    This should be called once from the main async application at startup.
     """
-    global AGENT_LATEST_MESSAGE
-    print(message)  # Log to console
-    AGENT_LATEST_MESSAGE = message
+    global AGENT_MESSAGE_QUEUE, _loop
+    _loop = loop
+    AGENT_MESSAGE_QUEUE = asyncio.Queue() # Queue stores (Optional[str], str)
+    print("[StatusMessenger] Async setup complete, queue created.")
 
-def get_status_messages() -> List[str]:
-    """Returns the current latest status message as a list."""
-    if AGENT_LATEST_MESSAGE is None:
-        return []
-    return [AGENT_LATEST_MESSAGE]
+def add_status_message(message: str) -> None: # session_id parameter removed
+    """
+    Adds a status message to the queue, associating it with the WebSocket session ID
+    from the current asyncio context. Prints to console.
+    """
+    if AGENT_MESSAGE_QUEUE is None or _loop is None:
+        print("[StatusMessenger ERROR] Messenger not initialized. Call setup_status_messenger_async first.")
+        print(f"Orphaned status message (messenger not ready): {message}")
+        return
+
+    # Get the WebSocket session ID from the context variable
+    websocket_session_id = current_websocket_session_id_var.get()
+
+    if websocket_session_id is None:
+        print(f"[StatusMessenger WARNING] No WebSocket session ID in context for message: {message}. Message will be queued without a specific session target.")
+        # Decide handling: queue with None, or a placeholder, or discard.
+        # Queuing with None allows broadcaster to decide (e.g., log, or if single-user mode, send anyway).
+    
+    print(f"Status for session {websocket_session_id or 'UnknownSession'}: {message}")  # Log to console
+
+    try:
+        # If called from a thread different from the loop's thread (e.g. sync agent tool).
+        _loop.call_soon_threadsafe(AGENT_MESSAGE_QUEUE.put_nowait, (websocket_session_id, message))
+    except RuntimeError:
+        # Fallback if loop is already running in the current thread (e.g. called from async code directly)
+        try:
+            AGENT_MESSAGE_QUEUE.put_nowait((websocket_session_id, message))
+        except Exception as e:
+            print(f"[StatusMessenger ERROR] Failed to queue message directly: {e}")
+
+
+async def stream_status_updates() -> AsyncIterator[Tuple[Optional[str], str]]: # session_id can be Optional
+    """
+    Asynchronously yields (websocket_session_id, message) tuples from the queue.
+    """
+    if AGENT_MESSAGE_QUEUE is None:
+        print("[StatusMessenger ERROR] Messenger not initialized for streaming. Call setup_status_messenger_async first.")
+        # To make this an empty async generator in this case, simply return.
+        # The `async def` with a `yield` elsewhere already makes it an async generator.
+        # An `async def` function without any `yield` is a coroutine function,
+        # but if it has at least one `yield`, it's an async generator.
+        # If this path is taken, the generator will simply finish immediately.
+        return
+
+    while True:
+        session_id, message = await AGENT_MESSAGE_QUEUE.get()
+        yield session_id, message
+        AGENT_MESSAGE_QUEUE.task_done()
 
 # Example for serving messages with Flask (optional, can be in a separate server file)
 # from flask import Flask, jsonify

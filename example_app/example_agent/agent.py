@@ -58,7 +58,7 @@ import mimetypes # For detecting mime types of files
 import io
 from dotenv import load_dotenv
 
-from status_messenger import add_status_message, get_status_messages
+from status_messenger import add_status_message # Removed get_status_messages
 
 
 # --- Configuration ---
@@ -98,42 +98,99 @@ vertexai.init(project=project_id, location=region)
 # --- Agent Tool Definitions ---
 # @title Define Tools for creating a ticket, adding notes to a ticket, add a file to the session, and getting the GCS URI
 
-# Tool function to create a support ticket via a mock API
-def status_message(message: str) -> str:
+# Tool function to send a status message
+def status_message(message: str) -> str: # session_id parameter removed
     """
-    Sends a status message to the user
+    Sends a status message to the user.
+    The WebSocket session ID is determined automatically from the context.
 
     Args:
-        message: A string containing the message to display to the user
+        message: A string containing the message to display to the user.
     """
+    # add_status_message will now get session_id from ContextVar
     add_status_message(message)
+    return f"Status message '{message}' sent."
 
+
+# Tool function to get the current session id
+# This tool is likely no longer needed for status messages if using ContextVar approach.
+# User can decide to keep or remove it based on other needs.
+# def get_session_id(tool_context: ToolContext) -> str:
+#     """
+#     Returns the session id of the current session (ADK Session ID).
+#     Args:
+#         tool_context: Injected by ADK.
+#     """
+#     # This retrieves the ADK session ID.
+#     # Note: The status system now uses a WebSocket session ID from ContextVar.
+#     session_id = tool_context._invocation_context.session.id
+#     print(f"get_session_id tool called, ADK session ID: {session_id}")
+#     return str(session_id)
+    
     
 
-# -- Reasoning Agent ---
-# This agent's role is to generate troubleshooting steps based on document content
-# (which is expected to be in the context after add_file_to_session is called).
+
+
+
+
+# --- Agents ---
+
+# -- Search Agent ---
+# This agent's role is to perform a Google search for grounding
+search_agent = None
+search_agent = Agent(
+    model="gemini-2.0-flash-exp", # A robuts and responsive model for performing simple actions
+    name="search_agent",
+    instruction=
+    """
+        You are a research expert for your company. You will be provided with a request to perform a Google search for something and you will return your findings.
+        
+        You will use the `google_search` tool to perform a Google search and respond with the results.
+        
+        An example workflow proceed with your research.
+        
+        An example workflow would be:
+        1: You will be provided with a topic or question to research
+        2: Use the `google_search` tool to perform a Google search for the provided question or topic.
+        3: Return the response to the calling agent
+        
+    """,
+    description="Performs searches related to a provided question or topic.",
+    tools=[
+        google_search, # Make the status_message function available as a tool
+    ],
+)
+
+
+# --- Reasoning Agent ---
+# This agent's role is to generate a detailed response to a users question
 reasoning_agent = None
 reasoning_agent = Agent(
     model="gemini-2.5-pro-preview-05-06", # Advanced model for complex tasks and reasoning
-    #model="gemini-2.5-flash-preview-04-17", # Alternate Model that can be used to help address resource constraints with more advanced models
     name="reasoning_agent",
     instruction=
     """
         You are a research expert for your company. You will be provided with a request to research something and you will return your findings.
         
-        You will use the `status_message` tool to provide status updates as you proceed with your research.
+        You have access to the following tools:
+        1: Tool `status_message`: Use this tool to provide status updates as you proceed with your research.
+        2: Tool `search_agent`: Use this AgentTool to request a Google search for grounding.
         
+               
         An example workflow would be:
-        1: You will be provided with a topic or question to research
+        1: You will be provided with a topic or question to research.
         2: Use the `status_message` tool to provide the status "Researching `the provided question or topic` now. Please wait..."
-        3: Use the `status_message` tool to provide the status "Research complete, generating the response now"
-        4: Use the `status_message` tool to provide the status "Sending results back to the root agent. Please wait."
-        5: Return the response to the calling agent
+        3: Use the `status_message` tool to provide the status "Performing a Google Search for `the provided question or topic` now. Please wait..."
+        4: Use the `search_agent` AgentTool to request a Google search for the provided question or topic.
+        5: Use the `status_message` tool to provide the status "Google Search results received, performing additional research. Please wait..."
+        6: Use the `status_message` tool to provide the status "Sending results back to the root agent. Please wait."
+        7: Return the response to the calling agent
         
     """,
     description="Performs reasearch related to a provided question or topic.",
     tools=[
+        AgentTool(agent=search_agent), # Make the search_agent available as a tool
+        # get_session_id, # Commented out: No longer needed by status_message tool
         status_message, # Make the status_message function available as a tool
     ],
 )
@@ -159,21 +216,27 @@ search_agent_team = Agent(
 
         You have access to specialized tools and sub-agents:
         1. AgentTool `reasoning_agent`: Provide the user's question or topic. This agent will research the topic or question and provide a detailed response. The `reasoning_agent`'s response will be streamed directly to the user.
+        2. Tool `status_message`: Use this tool to provide status updates as you proceed with your research. (No longer requires session_id parameter from LLM)
+        
+      
 
         Your workflow:
         1. Start by greeting the user.
         2. Ask no more than 1-2 clarifying questions to understand their research request.
         3. Once the request is clear, inform the user you will begin the research (e.g., "Okay, I'll start researching that for you. Please wait a moment.").
-        4. Call the `reasoning_agent` with the user's research request.
-        5. Use the `status_message` tool to provide the status "Resutls from the research agent received. Please wait."
-        6. Provide the full audit report from the `research_agent` to the user. Do not summarize this information, just return the full report exactly as you receive it. 
-        7. Use the `status_message` tool to provide the status "Research complete."
-        8. Ask the user if there is anything else you can help with.
+        4. Use the `status_message` tool to provide the status "Sending to the research agent, please wait."
+        5. Call the `reasoning_agent` and provide the user's research request. 
+        6. Use the `status_message` tool to provide the status "Resutls from the research agent received. Please wait."
+        7. Provide the full audit report from the `research_agent` to the user. Do not summarize this information, just return the full report exactly as you receive it. 
+        8. Use the `status_message` tool to provide the status "Research complete."
+        9. Ask the user if there is anything else you can help with.
        
     """,
     tools=[
         AgentTool(agent=reasoning_agent), # Make the reasoning_agent available as a tool
         status_message, # Make the status_message function available as a tool
+    ],
+    sub_agents=[
     ],
 
 )

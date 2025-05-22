@@ -1,0 +1,71 @@
+# Status Messenger (Python Package Source)
+
+> This document describes the source code of the `status_messenger` Python package. Its primary role is to provide server-side capabilities for queuing status messages from application logic (e.g., agent tools) and making them available for broadcasting to specific client sessions over WebSockets. It uses `contextvars` for session ID management.
+
+This Python package is designed to be used in an asynchronous server environment, like one built with FastAPI or Starlette.
+
+## Core Files and Functionality
+
+The package consists of two main files: `status_messenger/messenger.py` (core logic) and `status_messenger/__init__.py` (package interface).
+
+### `status_messenger/messenger.py`
+
+This file contains the primary implementation.
+
+- **`current_websocket_session_id_var: ContextVar[Optional[str]]`**
+  - A `contextvars.ContextVar` instance.
+  - **Purpose:** To store the WebSocket session ID of the client currently being processed in the current asynchronous task's context. This allows `add_status_message` to implicitly know which session a status update belongs to without requiring `session_id` to be passed explicitly through all application layers.
+  - **Usage:** Set by the main application (e.g., `main.py` in a WebSocket endpoint) before agent logic runs, and reset afterwards.
+
+- **`AGENT_MESSAGE_QUEUE: Optional[asyncio.Queue[Tuple[Optional[str], str]]]`**
+  - An `asyncio.Queue`.
+  - **Purpose:** To buffer status messages as `(session_id, message_text)` tuples. `session_id` can be `None` if not found in the context, allowing the broadcaster to handle such cases.
+  - **Initialized by:** `setup_status_messenger_async`.
+
+- **`_loop: Optional[asyncio.AbstractEventLoop]`**
+  - Stores the asyncio event loop instance.
+  - **Purpose:** Used by `add_status_message` to safely schedule queue operations from potentially synchronous contexts (like agent tools not running in the loop's thread).
+  - **Set by:** `setup_status_messenger_async`.
+
+- **`setup_status_messenger_async(loop: asyncio.AbstractEventLoop) -> None`**
+  - **Purpose:** Initializes the `_loop` variable and creates the `AGENT_MESSAGE_QUEUE`.
+  - **Called:** Typically once at server startup by the main application.
+
+- **`add_status_message(message: str) -> None`**
+  - **Purpose:** The primary function for application/agent code to send a status update.
+  - **Logic:**
+    1. Retrieves the `websocket_session_id` using `current_websocket_session_id_var.get()`.
+    2. Logs the message with the session ID (or 'UnknownSession' if ID is `None`).
+    3. Puts the `(websocket_session_id, message)` tuple onto `AGENT_MESSAGE_QUEUE`.
+    4. Uses `_loop.call_soon_threadsafe` to enqueue the message, making it safe to call from synchronous code that might be running in a different thread than the event loop. Includes a fallback to `put_nowait` for calls from within the loop's thread.
+
+- **`stream_status_updates() -> AsyncIterator[Tuple[Optional[str], str]]`**
+  - **Purpose:** An asynchronous generator for the message broadcaster (in `main.py`) to consume.
+  - **Logic:**
+    1. Checks if `AGENT_MESSAGE_QUEUE` is initialized; if not, it returns (effectively an empty async generator).
+    2. Enters an infinite loop:
+       - Asynchronously gets a `(session_id, message)` tuple from `AGENT_MESSAGE_QUEUE.get()`.
+       - `yield`s the tuple.
+       - Calls `AGENT_MESSAGE_QUEUE.task_done()`.
+
+### `status_messenger/__init__.py`
+
+This file defines the public interface of the `status_messenger` package.
+
+- **Exports:**
+  - `add_status_message`
+  - `setup_status_messenger_async`
+  - `stream_status_updates`
+  - (Note: `current_websocket_session_id_var` is *not* exported by `__init__.py`; applications like `main.py` import it directly from `status_messenger.messenger`.)
+
+## Design Notes and Patterns
+
+- **Asynchronous Operations:** Leverages `asyncio` for non-blocking message queuing and streaming, suitable for modern Python web frameworks.
+- **Implicit Context for Session ID:** Uses `contextvars` to avoid explicit `session_id` passing through all layers of agent code down to the status update call. The main application server is responsible for setting this context.
+- **Thread Safety for Message Submission:** `add_status_message` uses `loop.call_soon_threadsafe` to allow synchronous agent tools (which might run in separate threads managed by an agent framework) to safely submit messages to the asyncio queue.
+- **Decoupling:** The messenger service itself is decoupled from WebSocket handling; it only manages a queue. The main application's broadcaster component is responsible for taking messages from the queue and sending them over WebSockets.
+
+## Source Code Links
+
+- [Main Logic (`messenger.py`)](status_messenger/messenger.py)
+- [Package Interface (`__init__.py`)](status_messenger/__init__.py)
