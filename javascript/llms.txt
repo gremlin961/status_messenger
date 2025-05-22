@@ -1,0 +1,70 @@
+# Status Messenger (JavaScript Library Source)
+
+> This document describes the source code of the `status-messenger.js` client-side JavaScript library. Its purpose is to connect to a server via WebSockets, receive status messages, and display the most current message in a specified HTML element. It includes features like JSON message buffering to handle potential fragmentation and automatic reconnection.
+
+This library is designed to be included in a web page and instantiated to manage status updates for a specific part of the UI.
+
+## Core File and Functionality (`status-messenger.js`)
+
+The entire library is contained within `status-messenger.js`.
+
+- **`startStatusUpdates(elementId, websocketUrl, reconnectDelayMs = 5000)` Function:**
+  - This is the main public function and entry point of the library.
+  - **Parameters:**
+    - `elementId`: The `id` of the HTML element where status messages will be displayed.
+    - `websocketUrl`: The URL of the WebSocket server to connect to.
+    - `reconnectDelayMs` (optional, default 5000): Delay in milliseconds before attempting to reconnect if the WebSocket connection is lost.
+  - **Initialization:**
+    - Retrieves the DOM element using `document.getElementById(elementId)`. Handles cases where the element is not found.
+    - Validates that `websocketUrl` is provided.
+    - Constructs the `finalWebsocketUrl`, automatically prepending `ws://` or `wss://` based on `window.location.protocol` if not already present.
+    - Initializes a `jsonBuffer = ""` string variable to accumulate incoming WebSocket data, which helps in handling potentially fragmented JSON messages.
+  - **`connect()` Inner Function:**
+    - This function encapsulates the WebSocket connection logic and is called initially and during reconnection attempts.
+    - Creates a `new WebSocket(finalWebsocketUrl)`.
+    - **`ws.onopen`:**
+      - Logs a successful connection.
+      - Sets an initial message (e.g., "Connected. Waiting for status...") in the `displayElement`.
+    - **`ws.onmessage` (Key Logic):**
+      1. Appends the received `event.data` to the `jsonBuffer`.
+      2. Attempts `JSON.parse(jsonBuffer)`.
+      3. **If parsing is successful:**
+         - Clears `jsonBuffer` (as a complete message has been processed).
+         - Checks if the parsed `packet` has `type === "status"` and `packet.data` is defined.
+         - If it's a valid status message:
+           - Clears `displayElement.innerHTML`.
+           - Creates a new `<p>` element, sets its `textContent` to `packet.data`.
+           - Appends the `<p>` element to `displayElement`.
+           - Scrolls `displayElement` to the bottom to show the latest message.
+         - Logs warnings for unexpected packet structures.
+      4. **If `JSON.parse(jsonBuffer)` throws an error:**
+         - If the error is a `SyntaxError`: Assumes the JSON is incomplete due to fragmentation. Logs this and keeps the partial data in `jsonBuffer` to be combined with the next incoming chunk.
+         - For other error types: Logs a more critical error, clears `jsonBuffer` (to prevent reprocessing malformed data), and displays a generic error message in the `displayElement`.
+    - **`ws.onclose`:**
+      - Clears `jsonBuffer`.
+      - Logs the closure event (code and reason).
+      - Displays a "Connection closed. Reconnecting..." message in `displayElement`.
+      - Sets `ws = null`.
+      - Schedules a call to `connect()` after `reconnectDelayMs` using `setTimeout`.
+    - **`ws.onerror`:**
+      - Logs the WebSocket error.
+      - Displays a "WebSocket error..." message in `displayElement`.
+  - **Return Value:**
+    - The `startStatusUpdates` function returns a "stop" function. When called, this stop function will:
+      - Check if the WebSocket (`ws`) instance exists.
+      - If so, it sets a custom `ws.onclose` handler to prevent reconnection and then calls `ws.close()`.
+
+- **Module Export:**
+  - The library uses a common pattern to export `startStatusUpdates`, making it available as `module.exports` in Node.js/CommonJS environments or attaching it to the `window` object in browsers.
+
+## Design Notes and Patterns
+
+- **Latest Message Display:** The library is designed to show only the most recently received valid status message, clearing previous content from the display element.
+- **JSON Fragmentation Handling:** Uses a `jsonBuffer` to accumulate incoming data chunks, attempting to parse only when a complete JSON object might have been formed. This makes it more resilient to network conditions that might fragment WebSocket messages.
+- **Automatic Reconnection:** Implements a simple automatic reconnection mechanism with a configurable delay if the WebSocket connection is closed unexpectedly.
+- **Error Handling:** Provides console logs for various events (connection, messages, errors, closure) and updates the display element with user-friendly messages for connection issues or parsing errors (other than incomplete JSON).
+- **Self-Contained WebSocket:** The library manages its own WebSocket lifecycle (connection, events, closure, reconnection).
+
+## Source Code Link
+
+- [Main JavaScript File (`status-messenger.js`)](status-messenger.js)

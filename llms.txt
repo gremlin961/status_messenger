@@ -1,0 +1,192 @@
+# Status Messenger
+
+> A library for Python and JavaScript to send and display real-time, session-specific status updates from server-side (e.g., agent) logic to a user interface, typically over WebSockets. It is designed to be useful in agentic workflows, such as those built with Google's Agent Development Kit (ADK).
+
+This project provides a Python package (`status-messenger` on PyPI) for server-side message queuing and context management, and a JavaScript library (`status-messenger` on npm, also available via CDN) for client-side message display. The goal of this document is to provide enough information for an LLM to write code to integrate these packages into a new or existing project.
+
+## Key Concepts
+
+- **Python Package (`status_messenger`):** Installed via pip. Handles server-side logic. It uses an `asyncio.Queue` to buffer status messages and `contextvars` to automatically associate these messages with the correct WebSocket session ID of the user who triggered the agent action.
+- **JavaScript Library (`status-messenger.js`):** Included via CDN or npm. Establishes a WebSocket connection to receive status messages and displays the most current message in a designated HTML element. It includes logic to handle potentially fragmented JSON messages.
+- **WebSocket Communication:** Status messages are JSON objects (`{"type": "status", "data": "..."}`) sent from the server to the specific client over a WebSocket.
+- **Session-Specific Updates:** The system ensures status messages are routed only to the user/session whose interaction generated the update.
+
+## Python Package Integration (`status-messenger`)
+
+This section describes how to integrate the `status-messenger` Python package into a server application (e.g., FastAPI).
+
+**1. Installation:**
+```bash
+pip install status-messenger
+```
+
+**2. Server Setup (Example: `main.py` in a FastAPI application):**
+
+   a.  **Import necessary components:**
+    ```python
+    import asyncio
+    import json # For creating JSON payloads
+    from typing import Dict # For type hinting active_websockets
+    from fastapi import FastAPI, WebSocket # Or your web framework's WebSocket
+    from starlette.websockets import WebSocketState # For checking connection state
+    import logging # For logging
+
+    # Imports from the status-messenger package
+    import status_messenger 
+    from status_messenger import current_websocket_session_id_var, setup_status_messenger_async, stream_status_updates 
+    
+    logger = logging.getLogger(__name__)
+    # Store active WebSocket connections, keyed by their session ID
+    active_websockets: Dict[str, WebSocket] = {}
+    app = FastAPI() # Your FastAPI app instance
+    ```
+
+   b.  **Initialize at Application Startup:**
+    Call `setup_status_messenger_async` and start the broadcaster task.
+    ```python
+    @app.on_event("startup")
+    async def startup_event():
+        loop = asyncio.get_running_loop()
+        setup_status_messenger_async(loop)
+        asyncio.create_task(status_message_broadcaster(), name="status_message_broadcaster_task")
+        logger.info("Status message broadcaster task scheduled.")
+    ```
+
+   c.  **Implement the Status Message Broadcaster:**
+    This task sends queued messages to the appropriate clients.
+    ```python
+    async def broadcast_status_to_client(websocket: WebSocket, status_text: str, session_id: str):
+        if websocket.client_state == WebSocketState.CONNECTED:
+            payload = {"type": "status", "data": status_text}
+            await websocket.send_text(json.dumps(payload))
+            logger.info(f"[{session_id}] SENT_STATUS_TO_CLIENT: {status_text}")
+
+    async def status_message_broadcaster():
+        logger.info("Status message broadcaster starting.")
+        async for ws_session_id, message in status_messenger.stream_status_updates():
+            if ws_session_id is None:
+                logger.warn(f"Status message with no session ID: {message}. Not broadcasting.")
+                continue
+            
+            ws = active_websockets.get(ws_session_id)
+            if ws:
+                try:
+                    await broadcast_status_to_client(ws, message, ws_session_id)
+                except Exception as e:
+                    logger.error(f"[{ws_session_id}] Error sending status via broadcaster: {e}", exc_info=True)
+            else:
+                logger.warn(f"[{ws_session_id}] No active WebSocket for status: {message}")
+    ```
+
+   d.  **Set WebSocket Session ID in Context (WebSocket Endpoint):**
+    When a client connects, set its unique WebSocket session ID into the `ContextVar`.
+    ```python
+    @app.websocket("/ws/{client_websocket_id}")
+    async def websocket_endpoint(websocket: WebSocket, client_websocket_id: str):
+        await websocket.accept()
+        active_websockets[client_websocket_id] = websocket
+        
+        context_token = None
+        try:
+            context_token = current_websocket_session_id_var.set(client_websocket_id)
+            
+            # --- Your main application/agent logic for this session ---
+            # Example: await handle_agent_interaction(websocket, client_websocket_id)
+            # During this handling, agent tools can call status_messenger.add_status_message()
+            # Keep connection alive or handle client messages:
+            while True:
+                data = await websocket.receive_text() # Or other interaction
+                # Process data...
+        except WebSocketDisconnect:
+            logger.info(f"[{client_websocket_id}] Client disconnected.")
+        finally:
+            if context_token:
+                current_websocket_session_id_var.reset(context_token)
+            active_websockets.pop(client_websocket_id, None)
+            logger.info(f"[{client_websocket_id}] Cleaned up session.")
+    ```
+
+**3. Agent Tool Usage (within your agent's code):**
+   The agent tool simply calls `add_status_message` with the message. The WebSocket session ID is picked up automatically from the context.
+   ```python
+   from status_messenger import add_status_message
+
+   def my_agent_status_tool(status_update_message: str) -> str:
+       """Tool to send a status update."""
+       add_status_message(status_update_message)
+       return f"Status update '{status_update_message}' has been sent."
+   ```
+   The LLM should be instructed to call this tool with only the message string.
+
+## JavaScript Library Integration (`status-messenger`)
+
+This section describes how to use the `status-messenger.js` library on the client-side.
+
+**1. Include the Library:**
+   The recommended way is to use the CDN link in your HTML:
+   ```html
+   <script src="https://cdn.jsdelivr.net/npm/status-messenger/status-messenger.js" defer></script>
+   ```
+   Alternatively, if you have a local copy (e.g., from the `javascript/` directory of this project or via npm `npm install status-messenger`), you can include it directly:
+   ```html
+   <script src="/path/to/your/local/status-messenger.js" defer></script>
+   ```
+
+**2. Prepare an HTML Element for Display:**
+   Add a `div` (or similar element) to your HTML where status messages will appear:
+   ```html
+   <div id="agent-status-display"></div>
+   ```
+
+**3. Initialize in Your Client-Side JavaScript:**
+   After your page loads and you have the WebSocket URL your application will use, initialize the status updates.
+   ```javascript
+   // In your main client-side script (e.g., script.js)
+
+   // Function to generate a unique ID for the client's WebSocket session
+   function generateClientSessionId() { 
+       return Math.random().toString(36).substring(2, 12); 
+   }
+
+   const clientSessionId = generateClientSessionId();
+   const websocketScheme = window.location.protocol === "https:" ? "wss://" : "ws://";
+   const websocketUrl = `${websocketScheme}${window.location.host}/ws/${clientSessionId}`;
+
+   // Your main application might establish its own WebSocket connection to websocketUrl for other purposes.
+   // const myAppMainSocket = new WebSocket(websocketUrl);
+   // ...
+
+   const statusDisplayElementId = "agent-status-display";
+   
+   if (typeof window.startStatusUpdates === 'function') {
+       // status-messenger.js will establish its own WebSocket connection to websocketUrl.
+       // It listens for messages of type "status" and displays their data.
+       window.startStatusUpdates(statusDisplayElementId, websocketUrl); 
+   } else {
+       console.error("status-messenger.js (startStatusUpdates function) not found.");
+   }
+   ```
+   **Note:** `status-messenger.js` creates its own WebSocket connection. Ensure your server's WebSocket endpoint (`/ws/{client_websocket_id}`) correctly uses the `client_websocket_id` from the URL to manage the connection in `active_websockets` and set the `ContextVar`.
+
+**4. Expected WebSocket Message Format (from Server):**
+   The JavaScript library expects messages in this JSON format:
+   ```json
+   {
+       "type": "status",
+       "data": "The actual status message string..."
+   }
+   ```
+
+## Example Application (Demonstrates Package Usage)
+
+The `example_app/` directory in this repository shows a full working example using these packages.
+- [Example Server (`main.py`)](example_app/main.py)
+- [Example Agent Logic (`agent.py`)](example_app/example_agent/agent.py)
+- [Example Client HTML (`index.html`)](example_app/static/index.html)
+- [Example Client Main Script (`script.js`)](example_app/static/script.js)
+
+## Further Information / Source Code
+
+- For more detailed project overview and development setup, see the main [README.md](README.md).
+- Python package source code: [python/](python/)
+- JavaScript library source code: [javascript/](javascript/)
