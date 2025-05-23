@@ -134,13 +134,13 @@ This section describes how to use the `status-messenger.js` library on the clien
    ```
 
 **2. Prepare an HTML Element for Display:**
-   Add a `div` (or similar element) to your HTML where status messages will appear:
+   Add a `div` (or similar element) with a unique ID to your HTML where status messages will appear. For example:
    ```html
-   <div id="agent-status-display"></div>
+   <div id="my-status-display-element"></div>
    ```
 
 **3. Initialize in Your Client-Side JavaScript:**
-   After your page loads and you have the WebSocket URL your application will use, initialize the status updates.
+   After your page loads and you have the WebSocket URL your application will use, initialize the status updates by calling `window.startStatusUpdates` with the ID of your chosen HTML element and the WebSocket URL.
    ```javascript
    // In your main client-side script (e.g., script.js)
 
@@ -157,11 +157,11 @@ This section describes how to use the `status-messenger.js` library on the clien
    // const myAppMainSocket = new WebSocket(websocketUrl);
    // ...
 
-   const statusDisplayElementId = "agent-status-display";
+   const statusDisplayElementId = "my-status-display-element"; // Use the ID of your HTML element
    
    if (typeof window.startStatusUpdates === 'function') {
        // status-messenger.js will establish its own WebSocket connection to websocketUrl.
-       // It listens for messages of type "status" and displays their data.
+       // It listens for messages of type "status" and displays their data in the element specified by statusDisplayElementId.
        window.startStatusUpdates(statusDisplayElementId, websocketUrl); 
    } else {
        console.error("status-messenger.js (startStatusUpdates function) not found.");
