@@ -168,11 +168,25 @@ This section describes how to use the `status-messenger.js` library on the clien
        console.error("status-messenger.js (startStatusUpdates function) not found.");
    }
    ```
-   **Note on WebSocket Connection:**
-   `status-messenger.js` always creates its own new WebSocket connection.
-   - This connection can point to the same server-side WebSocket endpoint that your main application uses for other communications (e.g., `/ws/{session_id}`), as demonstrated in the `example_app/`. In this scenario, your server would send various types of messages (application-specific, agent responses, and status messages) over any client connection to this shared endpoint. `status-messenger.js` will internally filter and process only the `{"type": "status", ...}` messages it receives on its connection. If your main application JavaScript also has a WebSocket connection to this same shared endpoint, it should ideally be coded to ignore `{"type": "status", ...}` messages to prevent redundant processing (see `example_app/static/script.js` for an example of this).
-   - Alternatively, you could configure `status-messenger.js` to connect to a dedicated server-side WebSocket endpoint that *only* serves status messages.
-   - Regardless of the strategy, ensure your server's WebSocket endpoint logic correctly uses the `client_websocket_id` (or equivalent session identifier from the WebSocket URL path) to manage the connection (e.g., in `active_websockets` for the Python server example) and, if applicable, to set the `ContextVar` for associating status messages with the correct session.
+   **Note on Client-Side WebSocket Connections and Server Endpoint:**
+
+   The `status-messenger.js` library (which runs in the client's browser) **always initiates its own, new WebSocket connection** from the client to the server. This is a fundamental behavior of the library.
+
+   *   **Server-Side Endpoint Configuration (Based on `example_app/`):**
+        *   The `example_app/main.py` defines **one type of WebSocket endpoint** (e.g., `/ws/{session_id}`). This single server endpoint is responsible for accepting incoming WebSocket connection requests from clients.
+        *   The server does **not** proactively create outgoing WebSocket connections for status messages; it listens for and accepts connections initiated by clients.
+
+   *   **Client-Side Connection Pattern (Based on `example_app/`):**
+        *   When using the `example_app/` pattern, the client's browser will establish **two separate WebSocket connections** that both target the *same* server-side endpoint URL (e.g., `wss://your.host/ws/your-session-id`):
+            1.  **Main Application Connection:** Initiated by your primary client-side JavaScript (e.g., `script.js` in the example) for general application communication (like sending user chat messages and receiving agent replies).
+            2.  **Status Messenger Connection:** Initiated by the `status-messenger.js` library itself when `window.startStatusUpdates()` is called. This connection is dedicated to receiving status messages.
+        *   The server, having accepted both connections on its single endpoint type, can then send different types of messages. Status messages (JSON `{"type": "status", ...}`) are typically directed by the server's broadcasting logic (like `status_message_broadcaster` in `main.py`) specifically to the WebSocket connection that was established by `status-messenger.js` for that session.
+        *   Your main application's client-side JavaScript (e.g., `script.js`) should ideally ignore any `{"type": "status", ...}` messages it might receive on its primary connection, to let `status-messenger.js` handle them exclusively. The `example_app/static/script.js` demonstrates this.
+
+   *   **Alternative Server Configuration (Dedicated Endpoint):**
+        *   While the `example_app/` shows a shared server endpoint, you *could* alternatively define a completely separate WebSocket endpoint on your server that *only* handles status messages. In this case, you would configure `window.startStatusUpdates()` with the URL of that dedicated status endpoint.
+
+   The key is that `status-messenger.js` is a client-side library that makes a client-initiated WebSocket connection. The server needs to have an endpoint ready to accept such connections.
 
 **4. Expected WebSocket Message Format (from Server):**
    The JavaScript library expects messages in this JSON format:
