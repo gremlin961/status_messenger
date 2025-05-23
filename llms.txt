@@ -160,14 +160,19 @@ This section describes how to use the `status-messenger.js` library on the clien
    const statusDisplayElementId = "my-status-display-element"; // Use the ID of your HTML element
    
    if (typeof window.startStatusUpdates === 'function') {
-       // status-messenger.js will establish its own WebSocket connection to websocketUrl.
-       // It listens for messages of type "status" and displays their data in the element specified by statusDisplayElementId.
+       // status-messenger.js will establish its own, independent WebSocket connection to the provided websocketUrl.
+       // It then listens for messages of type "status" on this connection and displays their data 
+       // in the HTML element specified by statusDisplayElementId.
        window.startStatusUpdates(statusDisplayElementId, websocketUrl); 
    } else {
        console.error("status-messenger.js (startStatusUpdates function) not found.");
    }
    ```
-   **Note:** `status-messenger.js` creates its own WebSocket connection. Ensure your server's WebSocket endpoint (`/ws/{client_websocket_id}`) correctly uses the `client_websocket_id` from the URL to manage the connection in `active_websockets` and set the `ContextVar`.
+   **Note on WebSocket Connection:**
+   `status-messenger.js` always creates its own new WebSocket connection.
+   - This connection can point to the same server-side WebSocket endpoint that your main application uses for other communications (e.g., `/ws/{session_id}`), as demonstrated in the `example_app/`. In this scenario, your server would send various types of messages (application-specific, agent responses, and status messages) over any client connection to this shared endpoint. `status-messenger.js` will internally filter and process only the `{"type": "status", ...}` messages it receives on its connection. If your main application JavaScript also has a WebSocket connection to this same shared endpoint, it should ideally be coded to ignore `{"type": "status", ...}` messages to prevent redundant processing (see `example_app/static/script.js` for an example of this).
+   - Alternatively, you could configure `status-messenger.js` to connect to a dedicated server-side WebSocket endpoint that *only* serves status messages.
+   - Regardless of the strategy, ensure your server's WebSocket endpoint logic correctly uses the `client_websocket_id` (or equivalent session identifier from the WebSocket URL path) to manage the connection (e.g., in `active_websockets` for the Python server example) and, if applicable, to set the `ContextVar` for associating status messages with the correct session.
 
 **4. Expected WebSocket Message Format (from Server):**
    The JavaScript library expects messages in this JSON format:
