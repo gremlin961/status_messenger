@@ -207,10 +207,10 @@ connectWebSocket(); // Connect the main chat WebSocket
 // Initialize status updates using the status-messenger library
 // It will connect to the same WebSocket endpoint and filter for status messages.
 if (typeof window.startStatusUpdates === 'function') {
-    console.info("Initializing status-messenger for #agent-status-messages");
+    console.info("Initializing status-messenger for #status-container");
     // The ws_url is the same as the main chat, as the server sends all message types over it.
     // status-messenger.js is now responsible for filtering and displaying only 'status' type messages.
-    window.startStatusUpdates('agent-status-messages', ws_url);
+    window.startStatusUpdates('status-container', ws_url);
 } else {
     console.error("status-messenger.js (startStatusUpdates) not found. Status messages will not be displayed by the library.");
 }
