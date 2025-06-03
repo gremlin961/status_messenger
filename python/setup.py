@@ -22,7 +22,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="status_messenger",
-    version="0.2.0", # Should match __version__ in __init__.py
+    version="0.3.1", # Should match __version__ in __init__.py
     author="Cline - AI Software Engineer",
     author_email="your_email@example.com", # Replace with a placeholder or actual email
     description="A simple package to manage and display status messages.",
@@ -41,6 +41,7 @@ setup(
     ],
     python_requires='>=3.7', # Specify your Python version compatibility
     install_requires=[
+        "google-cloud-pubsub>=2.0.0", # Added for GCP Pub/Sub integration
         # Add any dependencies here, e.g., "flask>=2.0" if you include the server
     ],
     # If you want to include a simple Flask server as an optional extra:

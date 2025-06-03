@@ -27,8 +27,25 @@ This file contains the primary implementation.
   - **Purpose:** Used by `add_status_message` to safely schedule queue operations from potentially synchronous contexts (like agent tools not running in the loop's thread).
   - **Set by:** `setup_status_messenger_async`.
 
+- **GCP Pub/Sub Globals (within `messenger.py`)**
+  - **`_pubsub_publisher: Optional[pubsub_v1.PublisherClient]`**: Stores the initialized Google Cloud Pub/Sub publisher client if Pub/Sub is enabled and configured. `None` otherwise.
+  - **`_pubsub_topic_path: Optional[str]`**: Stores the fully qualified path to the Pub/Sub topic. `None` if not configured.
+  - **`_pubsub_enabled: bool`**: A flag indicating whether Pub/Sub publishing is active. Determined by environment variables and successful client initialization.
+
+- **`_pubsub_callback(future: Any) -> None`**
+  - **Purpose:** A callback function attached to the `Future` returned by the Pub/Sub `publish` call.
+  - **Logic:** Logs the result of the publish operation (success with message ID or failure with error).
+
 - **`setup_status_messenger_async(loop: asyncio.AbstractEventLoop) -> None`**
-  - **Purpose:** Initializes the `_loop` variable and creates the `AGENT_MESSAGE_QUEUE`.
+  - **Purpose:** Initializes the `_loop` variable, creates the `AGENT_MESSAGE_QUEUE`, and attempts to initialize GCP Pub/Sub publishing.
+  - **Pub/Sub Initialization Logic:**
+    1. Checks if `google-cloud-pubsub` library is installed.
+    2. Reads environment variables:
+       - `STATUS_MESSENGER_PUBSUB_ENABLED`: If "true", attempts to enable Pub/Sub.
+       - `GOOGLE_CLOUD_PROJECT`: GCP Project ID.
+       - `STATUS_MESSENGER_PUBSUB_TOPIC_ID`: Pub/Sub Topic ID.
+    3. If all conditions are met (library present, env vars set), it initializes `_pubsub_publisher` and `_pubsub_topic_path`.
+    4. Sets `_pubsub_enabled` to `True` on success, `False` otherwise, logging appropriate messages.
   - **Called:** Typically once at server startup by the main application.
 
 - **`add_status_message(message: str) -> None`**
@@ -57,6 +74,24 @@ This file defines the public interface of the `status_messenger` package.
   - `setup_status_messenger_async`
   - `stream_status_updates`
   - (Note: `current_websocket_session_id_var` is *not* exported by `__init__.py`; applications like `main.py` import it directly from `status_messenger.messenger`.)
+  - `publish_agent_event`
+
+- **`publish_agent_event(event_data: Dict[str, Any], event_type: str = "agent_event") -> None`**
+  - **Purpose:** To publish structured event data to the configured GCP Pub/Sub topic.
+  - **Logic:**
+    1. Checks if `_pubsub_enabled` is `True` and if the publisher and topic path are configured. If not, logs a warning and returns.
+    2. Retrieves the `websocket_session_id` using `current_websocket_session_id_var.get()`.
+    3. Constructs a JSON payload containing:
+       - `websocket_session_id`
+       - `event_type`
+       - `timestamp` (UTC ISO format)
+       - `data` (the provided `event_data` dictionary)
+    4. Serializes the payload to UTF-8 encoded JSON bytes.
+    5. Defines an inner function `do_publish` that:
+       - Calls `_pubsub_publisher.publish()` with the topic path and data.
+       - Attaches `_pubsub_callback` to the `Future` returned by `publish()`.
+    6. Schedules `do_publish` to run on the event loop using `_loop.call_soon_threadsafe`. This ensures the Pub/Sub client's publish method (which might have its own async/threading considerations) is called from the loop's thread.
+    7. Logs success or failure of submitting the event for publishing. Actual publish confirmation comes via `_pubsub_callback`.
 
 ## Design Notes and Patterns
 

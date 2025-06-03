@@ -21,14 +21,23 @@ Status Messenger Package
 Provides a simple way to manage and display status messages,
 typically for agentic applications or long-running processes
 where updates need to be communicated to a UI.
+It also supports publishing structured agent events to GCP Pub/Sub.
 """
 
-from .messenger import add_status_message, setup_status_messenger_async, stream_status_updates
+from .messenger import (
+    add_status_message,
+    setup_status_messenger_async,
+    stream_status_updates,
+    publish_agent_event, # Added for Pub/Sub
+    current_websocket_session_id_var # Exporting for direct use if needed by advanced server setups
+)
 
 __all__ = [
     "add_status_message",
     "setup_status_messenger_async",
     "stream_status_updates",
+    "publish_agent_event", # Added for Pub/Sub
+    "current_websocket_session_id_var",
 ]
 
-__version__ = "0.2.0" # Consider incrementing version if making package changes
+__version__ = "0.3.1" # Incremented version due to new feature
