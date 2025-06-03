@@ -44,6 +44,28 @@ if [ ! -f "$ENV_FILE" ]; then
   fi
   rm -f "$ENV_FILE.bak" # Remove backup file on successful replacement
   echo ".env file created and configured with Project ID: $USER_GCP_PROJECT_ID"
+
+  # Ask about Pub/Sub only if .env file was just created
+  echo "--------------------------------------------------"
+  read -p "Do you want to enable Pub/Sub for status messages? (y/n): " ENABLE_PUBSUB
+  if [[ "$ENABLE_PUBSUB" == "y" || "$ENABLE_PUBSUB" == "Y" ]]; then
+    read -p "Please enter your Google Cloud Pub/Sub Topic ID: " PUBSUB_TOPIC_ID
+    if [ -z "$PUBSUB_TOPIC_ID" ]; then
+      echo "No Pub/Sub Topic ID entered. Pub/Sub will not be enabled."
+    else
+      echo "Enabling Pub/Sub and configuring topic ID: $PUBSUB_TOPIC_ID"
+      # Append Pub/Sub settings to .env file
+      # Ensure there's a newline before appending if the file doesn't end with one
+      if [ -s "$ENV_FILE" ] && [ "$(tail -c1 "$ENV_FILE"; echo x)" != $'\nx' ]; then
+        echo "" >> "$ENV_FILE"
+      fi
+      echo "STATUS_MESSENGER_PUBSUB_ENABLED=true" >> "$ENV_FILE"
+      echo "STATUS_MESSENGER_PUBSUB_TOPIC_ID=$PUBSUB_TOPIC_ID" >> "$ENV_FILE"
+      echo "Pub/Sub enabled and configured in $ENV_FILE."
+    fi
+  else
+    echo "Pub/Sub not enabled."
+  fi
 else
   echo ".env file already exists at $ENV_FILE. Using existing configuration."
 fi

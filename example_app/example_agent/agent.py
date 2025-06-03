@@ -58,16 +58,8 @@ import mimetypes # For detecting mime types of files
 import io
 from dotenv import load_dotenv
 
-from status_messenger import add_status_message # Removed get_status_messages
-
-
-# --- Configuration ---
-load_dotenv()
-project_id = os.environ.get('GOOGLE_CLOUD_PROJECT') # Your GCP Project ID
-location = os.environ.get('GOOGLE_CLOUD_LOCATION') # Vertex AI RAG location (can be global for certain setups)
-region = os.environ.get('GOOGLE_CLOUD_REGION') # Your GCP region for Vertex AI resources and GCS bucket
-
-
+from status_messenger import add_status_message, publish_agent_event # Added publish_agent_event
+import uuid
 
 
 # Ignore all warnings
@@ -80,10 +72,12 @@ logging.basicConfig(level=logging.ERROR)
 
 
 # --- Environment Setup ---
+load_dotenv() # Load environment variables from .env file
 # Set environment variables required by some Google Cloud libraries
 os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "1" # Instructs the google.genai library to use Vertex AI backend
-os.environ["GOOGLE_CLOUD_PROJECT"] = project_id
-os.environ["GOOGLE_CLOUD_LOCATION"] = region
+project_id = os.environ["GOOGLE_CLOUD_PROJECT"]
+region = os.environ["GOOGLE_CLOUD_LOCATION"]
+
 
 # --- Initialize Vertex AI SDK ---
 # Initialize the Vertex AI client library with project and location/region details
@@ -112,22 +106,29 @@ def status_message(message: str) -> str: # session_id parameter removed
     return f"Status message '{message}' sent."
 
 
-# Tool function to get the current session id
-# This tool is likely no longer needed for status messages if using ContextVar approach.
-# User can decide to keep or remove it based on other needs.
-# def get_session_id(tool_context: ToolContext) -> str:
-#     """
-#     Returns the session id of the current session (ADK Session ID).
-#     Args:
-#         tool_context: Injected by ADK.
-#     """
-#     # This retrieves the ADK session ID.
-#     # Note: The status system now uses a WebSocket session ID from ContextVar.
-#     session_id = tool_context._invocation_context.session.id
-#     print(f"get_session_id tool called, ADK session ID: {session_id}")
-#     return str(session_id)
-    
-    
+# Tool function to publish an event to GCP Pub/Sub
+def publish_to_gcp_pubsub_tool(event_data_json: str, event_type: str = "custom_agent_event") -> str:
+    """
+    Publishes a structured event from the agent to a configured GCP Pub/Sub topic.
+    The agent should provide the event data as a JSON string.
+
+    Args:
+        event_data_json: A JSON string representing the structured data for the event.
+        event_type: A string to categorize the event (e.g., 'decision_made', 'action_taken').
+    """
+    try:
+        event_data = json.loads(event_data_json) # Convert JSON string from LLM to Python dict
+        event_data["app_message_id"] = str(uuid.uuid4()) 
+        # publish_agent_event is the new function in status_messenger package
+        publish_agent_event(event_data=event_data, event_type=event_type)
+        return f"Event (type: {event_type}) with data '{event_data_json}' has been queued for publishing to GCP Pub/Sub."
+    except json.JSONDecodeError:
+        return "Error: The provided event_data_json was not valid JSON."
+    except Exception as e:
+        # It would be good to log the detailed error server-side
+        print(f"[AgentTool ERROR] Error attempting to publish event to GCP Pub/Sub: {e}")
+        return f"Error attempting to publish event to GCP Pub/Sub: {str(e)}"
+
 
 
 
@@ -139,7 +140,7 @@ def status_message(message: str) -> str: # session_id parameter removed
 # This agent's role is to perform a Google search for grounding
 search_agent = None
 search_agent = Agent(
-    model="gemini-2.0-flash-exp", # A robuts and responsive model for performing simple actions
+    model="gemini-2.0-flash-001", # A robuts and responsive model for performing simple actions
     name="search_agent",
     instruction=
     """
@@ -175,6 +176,7 @@ reasoning_agent = Agent(
         You have access to the following tools:
         1: Tool `status_message`: Use this tool to provide status updates as you proceed with your research.
         2: Tool `search_agent`: Use this AgentTool to request a Google search for grounding.
+        3: Tool `publish_to_gcp_pubsub_tool`: Use this tool to publish information to GCP Pub/Sub.
         
                
         An example workflow would be:
@@ -183,15 +185,16 @@ reasoning_agent = Agent(
         3: Use the `status_message` tool to provide the status "Performing a Google Search for `the provided question or topic` now. Please wait..."
         4: Use the `search_agent` AgentTool to request a Google search for the provided question or topic.
         5: Use the `status_message` tool to provide the status "Google Search results received, performing additional research. Please wait..."
-        6: Use the `status_message` tool to provide the status "Sending results back to the root agent. Please wait."
-        7: Return the response to the calling agent
+        6: After analysis, if a key finding is identified, use `publish_to_gcp_pubsub_tool` with `event_type="key_finding_identified"` and `event_data_json` containing the finding details in JSON format.
+        7: Use the `status_message` tool to provide the status "Sending results back to the root agent. Please wait."
+        8: Return the response to the calling agent
         
     """,
-    description="Performs reasearch related to a provided question or topic.",
+    description="Performs reasearch related to a provided question or topic and can publish key events to GCP Pub/Sub.",
     tools=[
         AgentTool(agent=search_agent), # Make the search_agent available as a tool
-        # get_session_id, # Commented out: No longer needed by status_message tool
         status_message, # Make the status_message function available as a tool
+        publish_to_gcp_pubsub_tool, # Publish events to GCP Pub/Sub
     ],
 )
 
@@ -215,8 +218,8 @@ search_agent_team = Agent(
         You are the lead support coordinator agent. Your goal is to understand the customer's question or topic, and then delegate to the appropriate agent or tool.
 
         You have access to specialized tools and sub-agents:
-        1. AgentTool `reasoning_agent`: Provide the user's question or topic. This agent will research the topic or question and provide a detailed response. The `reasoning_agent`'s response will be streamed directly to the user.
-        2. Tool `status_message`: Use this tool to provide status updates as you proceed with your research. (No longer requires session_id parameter from LLM)
+        1. AgentTool `reasoning_agent`: Provide the user's question or topic. This agent will research the topic or question and provide a detailed response. The `reasoning_agent`'s response will be streamed directly to the user. This agent can also publish events to Pub/Sub.
+        2. Tool `status_message`: Use this tool to provide status updates as you proceed with your research.
         
       
 
@@ -226,15 +229,16 @@ search_agent_team = Agent(
         3. Once the request is clear, inform the user you will begin the research (e.g., "Okay, I'll start researching that for you. Please wait a moment.").
         4. Use the `status_message` tool to provide the status "Sending to the research agent, please wait."
         5. Call the `reasoning_agent` and provide the user's research request. 
-        6. Use the `status_message` tool to provide the status "Resutls from the research agent received. Please wait."
-        7. Provide the full audit report from the `research_agent` to the user. Do not summarize this information, just return the full report exactly as you receive it. 
-        8. Use the `status_message` tool to provide the status "Research complete."
+        6. Use the `status_message` tool to provide the status "Results from the research agent received. Please wait."
+        7. Provide the full audit report from the `reasoning_agent` to the user. Do not summarize this information, just return the full report exactly as you receive it. 
+        8. Use the `status_message` tool to provide the status "Research complete and final event published."
         9. Ask the user if there is anything else you can help with.
        
     """,
     tools=[
         AgentTool(agent=reasoning_agent), # Make the reasoning_agent available as a tool
         status_message, # Make the status_message function available as a tool
+        #publish_to_gcp_pubsub_tool, # Added new tool
     ],
     sub_agents=[
     ],

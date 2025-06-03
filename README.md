@@ -18,6 +18,7 @@ This guide outlines how to integrate the `status_messenger` system into your app
 *   **JavaScript Library (`status-messenger.js`):** A client-side library that establishes a WebSocket connection (or uses an existing one if modified) to receive status messages and display them in a designated HTML element. It shows only the latest message received.
 *   **WebSocket Communication:** Status messages are sent from the server to the relevant client over a WebSocket connection.
 *   **Session-Specific Updates:** The system ensures that status messages from an agent interaction are routed only to the specific user/session involved.
+*   **GCP Pub/Sub Event Publishing (Python):** The Python package can also publish structured events to a Google Cloud Pub/Sub topic, allowing for broader system integration, analytics, or persistent logging of agent activities. This is an optional feature configured via environment variables.
 
 ### Server-Side Integration (Python - Example with FastAPI)
 
@@ -140,6 +141,23 @@ This guide outlines how to integrate the `status_messenger` system into your app
    # This 'status_message_tool' is then registered with your ADK Agent.
    # The LLM should be prompted to call this tool with just the message string argument.
    ```
+
+**6. Publishing Events to GCP Pub/Sub (Python - Optional):**
+   If configured, the Python `status_messenger` can also publish events.
+
+   ```python
+   # In your agent's tool or other server-side logic
+   from status_messenger import publish_agent_event # Import the function
+
+   # Assuming setup_status_messenger_async has been called,
+   # Pub/Sub is enabled via environment variables (see python/README.md for details),
+   # and current_websocket_session_id_var is set if you want the session ID in the event.
+
+   event_details = {"action": "item_purchased", "item_id": "XYZ123", "user_id": "user_abc"}
+   publish_agent_event(event_details, event_type="ecommerce_transaction")
+   # This will send a structured JSON payload to the configured Pub/Sub topic.
+   ```
+   For details on enabling and configuring Pub/Sub, refer to `python/README.md`. Key environment variables include `STATUS_MESSENGER_PUBSUB_ENABLED`, `GOOGLE_CLOUD_PROJECT`, and `STATUS_MESSENGER_PUBSUB_TOPIC_ID`.
 
 ### Client-Side Integration (JavaScript)
 

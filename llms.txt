@@ -28,6 +28,7 @@ For an LLM to integrate `status-messenger` effectively, understanding which part
 - **JavaScript Library (`status-messenger.js`):** Included via CDN or npm. Establishes its own WebSocket connection to receive status messages and displays the most current message in a designated HTML element. It includes logic to handle potentially fragmented JSON messages and automatic reconnection.
 - **WebSocket Communication:** Status messages are JSON objects (`{"type": "status", "data": "..."}`) sent from the server to the specific client over a WebSocket.
 - **Session-Specific Updates:** The system ensures status messages are routed only to the user/session whose interaction generated the update. This relies on consistent `session_id` usage across client and server.
+- **GCP Pub/Sub Event Publishing (Python Package):** Optionally, the Python package can be configured to publish structured events (e.g., agent actions, significant occurrences) to a Google Cloud Pub/Sub topic. This is initialized during `setup_status_messenger_async` if specific environment variables are set (see `python/llms.txt` or `python/README.md` for details on `STATUS_MESSENGER_PUBSUB_ENABLED`, `GOOGLE_CLOUD_PROJECT`, `STATUS_MESSENGER_PUBSUB_TOPIC_ID`). Events are published using the `publish_agent_event` function.
 
 ## Python Package Integration (`status-messenger`)
 
@@ -154,6 +155,29 @@ pip install status-messenger
        return f"Status update '{status_update_message}' has been sent."
    ```
    Instruct your LLM (e.g., in its prompt) to use this tool with just the message string when it needs to provide a status update.
+
+**4. Publishing Events to GCP Pub/Sub (Python Package - Optional):**
+   If Pub/Sub is enabled and configured (via environment variables detailed in `python/README.md` and `python/llms.txt`), agents or server logic can publish structured events.
+   ```python
+   from status_messenger import publish_agent_event # Also ensure it's in __init__.py
+
+   def my_agent_event_publishing_tool(event_details: dict, event_type_name: str) -> str:
+       """
+       Tool to publish a structured event to GCP Pub/Sub.
+       The LLM should call this with a dictionary of event details and an event type string.
+       """
+       # The current_websocket_session_id_var should be set in the context
+       # if the session ID needs to be part of the published event.
+       publish_agent_event(event_data=event_details, event_type=event_type_name)
+       return f"Event '{event_type_name}' with details {event_details} submitted for Pub/Sub publishing."
+
+   # Example usage by LLM:
+   # my_agent_event_publishing_tool(
+   #     event_details={"tool_used": "database_query", "query_hash": "abcdef12345"},
+   #     event_type_name="agent_tool_usage"
+   # )
+   ```
+   The `setup_status_messenger_async` function handles the initialization of the Pub/Sub publisher client. The `publish_agent_event` function then uses this client to send messages. The payload includes the `event_data`, `event_type`, a `timestamp`, and the `websocket_session_id` (if available from `current_websocket_session_id_var`).
 
 ## JavaScript Library Integration (`status-messenger.js`)
 
