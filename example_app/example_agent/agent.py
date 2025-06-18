@@ -74,14 +74,14 @@ logging.basicConfig(level=logging.ERROR)
 # --- Environment Setup ---
 load_dotenv() # Load environment variables from .env file
 # Set environment variables required by some Google Cloud libraries
-os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "1" # Instructs the google.genai library to use Vertex AI backend
-project_id = os.environ["GOOGLE_CLOUD_PROJECT"]
-region = os.environ["GOOGLE_CLOUD_LOCATION"]
+#os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "1" # Instructs the google.genai library to use Vertex AI backend
+#project_id = os.environ["GOOGLE_CLOUD_PROJECT"]
+#region = os.environ["GOOGLE_CLOUD_LOCATION"]
 
 
 # --- Initialize Vertex AI SDK ---
 # Initialize the Vertex AI client library with project and location/region details
-vertexai.init(project=project_id, location=region)
+#vertexai.init(project=project_id, location=region)
 
 
 
@@ -140,7 +140,7 @@ def publish_to_gcp_pubsub_tool(event_data_json: str, event_type: str = "custom_a
 # This agent's role is to perform a Google search for grounding
 search_agent = None
 search_agent = Agent(
-    model="gemini-2.0-flash-001", # A robuts and responsive model for performing simple actions
+    model="gemini-2.5-flash", # A robuts and responsive model for performing simple actions
     name="search_agent",
     instruction=
     """
@@ -167,7 +167,7 @@ search_agent = Agent(
 # This agent's role is to generate a detailed response to a users question
 reasoning_agent = None
 reasoning_agent = Agent(
-    model="gemini-2.5-pro-preview-05-06", # Advanced model for complex tasks and reasoning
+    model="gemini-2.5-pro", # Advanced model for complex tasks and reasoning
     name="reasoning_agent",
     instruction=
     """
@@ -210,7 +210,7 @@ runner_root = None # Initialize runner variable (although runner is created late
     # Define the root agent (coordinator)
 search_agent_team = Agent(
     name="search_support_agent",    # Name for the root agent
-    #model="gemini-2.0-flash-001", # Model for the root agent (orchestration)
+    #model="gemini-2.5-flash", # Model for the root agent (orchestration)
     model="gemini-2.0-flash-exp", # Model that supports Audio input and output 
     description="The main coordinator agent. Handles user requests and delegates tasks to specialist sub-agents and tools.", # Description (useful if this agent were itself a sub-agent)
     instruction=                  # The core instructions defining the workflow

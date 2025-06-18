@@ -4,7 +4,10 @@
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 ENV_FILE="$SCRIPT_DIR/example_agent/.env"
 ENV_TEMPLATE="$SCRIPT_DIR/example_agent/env_template"
-PLACEHOLDER_PROJECT_LINE="GOOGLE_CLOUD_PROJECT=rkiles-demo-host-vpc" # Line to find and replace
+PLACEHOLDER_PROJECT_LINE="GOOGLE_CLOUD_PROJECT=YOUR_GPC_PROJECT_ID" # Line to find and replace
+PLACEHOLDER_PUBSUB_ENABLED_LINE="STATUS_MESSENGER_PUBSUB_ENABLED=false" # Line to find and replace
+PLACEHOLDER_PUBSUB_TOPIC_LINE="STATUS_MESSENGER_PUBSUB_TOPIC_ID=YOUR_PUBSUB_TOPIC_ID" # Line to find and replace
+
 
 echo "--------------------------------------------------"
 echo "Status Messenger - Example App Launcher"
@@ -33,16 +36,7 @@ if [ ! -f "$ENV_FILE" ]; then
   echo "Updating GOOGLE_CLOUD_PROJECT in .env file..."
   # Use sed to replace the specific line. Works on macOS and Linux.
   # The | character is used as a delimiter for sed to avoid issues if paths contain /
-  sed -i.bak "s|$PLACEHOLDER_PROJECT_LINE|GOOGLE_CLOUD_PROJECT=$USER_GCP_PROJECT_ID|" "$ENV_FILE"
-  if [ $? -ne 0 ]; then
-    echo "Error: Failed to update Project ID in .env file."
-    # Attempt to restore from backup if sed failed partway
-    if [ -f "$ENV_FILE.bak" ]; then
-        mv "$ENV_FILE.bak" "$ENV_FILE"
-    fi
-    exit 1
-  fi
-  rm -f "$ENV_FILE.bak" # Remove backup file on successful replacement
+  sed -i '' "s|$PLACEHOLDER_PROJECT_LINE|GOOGLE_CLOUD_PROJECT=$USER_GCP_PROJECT_ID|" "$ENV_FILE"
   echo ".env file created and configured with Project ID: $USER_GCP_PROJECT_ID"
 
   # Ask about Pub/Sub only if .env file was just created
@@ -59,8 +53,8 @@ if [ ! -f "$ENV_FILE" ]; then
       if [ -s "$ENV_FILE" ] && [ "$(tail -c1 "$ENV_FILE"; echo x)" != $'\nx' ]; then
         echo "" >> "$ENV_FILE"
       fi
-      echo "STATUS_MESSENGER_PUBSUB_ENABLED=true" >> "$ENV_FILE"
-      echo "STATUS_MESSENGER_PUBSUB_TOPIC_ID=$PUBSUB_TOPIC_ID" >> "$ENV_FILE"
+      sed -i '' "s|$PLACEHOLDER_PUBSUB_ENABLED_LINE|STATUS_MESSENGER_PUBSUB_ENABLED=true|" "$ENV_FILE"
+      sed -i '' "s|$PLACEHOLDER_PUBSUB_TOPIC_LINE|STATUS_MESSENGER_PUBSUB_TOPIC_ID=$PUBSUB_TOPIC_ID|" "$ENV_FILE"
       echo "Pub/Sub enabled and configured in $ENV_FILE."
     fi
   else
